@@ -4,7 +4,6 @@ import { Search, X } from 'lucide-vue-next'
 
 /*
  *
- * 可配置项（props）：
  *  - modelValue      : v-model 绑定值
  *  - placeholder     : 占位文本
  *  - icon            : 左侧图标（传入任意 lucide-vue-next 图标组件）
@@ -13,8 +12,8 @@ import { Search, X } from 'lucide-vue-next'
  *  - borderRadius    : 圆角（任意 CSS 值，如 '12px'，默认胶囊形）
  *  - height          : 高度（默认 '44px'）
  *  - iconColor / textColor : 图标与文字颜色
- *  - borderColor     : 边框颜色，传 'none' 可去掉边框
- *  - focusColor      : 聚焦时边框/光晕颜色
+ *  - borderColor     : 边框颜色，传 'none' 则无边框
+ *  - focusColor      : 聚焦颜色
  *  - disabled        : 禁用状态
  *
  * 事件：update:modelValue、search（回车触发）、clear、focus、blur
