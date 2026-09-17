@@ -47,7 +47,7 @@ const props = withDefaults(
     borderColor: '#e2e5ea',
     focusColor: '#409eff',
     disabled: false,
-    type: 'text'
+    type: 'text',
   },
 )
 
