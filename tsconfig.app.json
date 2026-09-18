@@ -3,6 +3,11 @@
   "include": ["env.d.ts", "src/**/*", "src/**/*.vue"],
   "exclude": ["src/**/__tests__/*"],
   "compilerOptions": {
+    // src/grok/ 是 vendored 的引擎（ESM .js，数值与上游逐位一致，不做改写），
+    // 允许 TS 引用它，但不参与类型检查。
+    "allowJs": true,
+    "checkJs": false,
+
     // Extra safety for array and object lookups, but may have false positives.
     "noUncheckedIndexedAccess": true,
 
