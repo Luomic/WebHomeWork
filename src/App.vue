@@ -57,22 +57,22 @@ function handleLeave() {
   
   <div style="display: flex;justify-content: center;margin: 32px;">
     <GrokCharacter mode="onboarding" :size="120" :plate="whiteColor"/>
-    <p style="font-size: 20px;margin-top: 16px;align-content: center;"><b>其实，我想说：<br>一个人逛，也挺好的。</b></p>
+    <p style="font-family: 'Round', system-ui, sans-serif; font-size: 20px;margin-top: 16px;align-content: center;">其实，我想说：<br><b>一个人逛，也挺好的。</b></p>
   </div>
 
   <div style="display:flex;justify-content: center;margin-top: 32px;flex-direction: row;">
-    <Button rounded style="width: 130px; height: 40px;">
+    <Button rounded style="width: 140px; height: 45px;">
       <AngleDoubleRight :size="22" />
       逛市集
     </Button>
-    <Button rounded style="width: 130px; height: 40px;margin-left: 8px;">
+    <Button rounded style="width: 140px; height: 45px;margin-left: 32px;">
       <Github :size="22" />
       Github
     </Button>
   </div>
   
   <!-- 卡片视图：无缝向左循环流动 -->
-  <Marquee class="marquee-row" :images="posters" :seconds-per-card="7" />
+  <Marquee class="marquee-row" :images="posters" :seconds-per-card="7" borderRadius="20px" />
 </template>
 
 <style scoped>
