@@ -209,7 +209,6 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
 
-  /* 系统色 Canvas 随 color-scheme 自动明暗，同时充当混合效果的不透明底板 */
   background: Canvas;
 
   mask-image: var(--dot-wave-fade);

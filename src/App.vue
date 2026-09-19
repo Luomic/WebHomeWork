@@ -9,15 +9,16 @@ import AngleDoubleRight from '@primeicons/vue/angle-double-right'
 import Github from '@primeicons/vue/github'
 import GrokCharacter from './components/GrokCharacter.vue'
 
+
 const whiteColor = ref('#fff')
 
 const posters = [
-  '/placeholder/1.jpg',
-  '/placeholder/2.jpg',
-  '/placeholder/3.jpg',
-  '/placeholder/4.jpg',
-  '/placeholder/5.jpg',
-  '/placeholder/6.jpg',
+  '/placeholder/1.webp',
+  '/placeholder/2.webp',
+  '/placeholder/3.webp',
+  '/placeholder/4.webp',
+  '/placeholder/5.webp',
+  '/placeholder/6.webp',
 ]
 const titleWrap = useTemplateRef<HTMLElement>('titleWrap')
 
@@ -49,18 +50,20 @@ function handleLeave() {
   </div>
 
   <div class="slogan">
-    <p>你说得对，但是 孤独市集 是一个非常神秘的网站。</p>
-
+    <p>欢迎来到孤独市集！这里是一个人也可以逛的校园二手市集。</p>
+    <p>有一些闲置的东西，一些正在寻找新主人的东西，</p>
+    <p>还有一些……不知道为什么会出现在这里的东西。随便看看，说不定就能淘到点好玩的。</p>
   </div>
   
-  <div style="display: flex;justify-content: center;margin-top: 32px;">
+  <div style="display: flex;justify-content: center;margin: 32px;">
     <GrokCharacter mode="onboarding" :size="120" :plate="whiteColor"/>
+    <p style="font-size: 20px;margin-top: 16px;align-content: center;"><b>其实，我想说：<br>一个人逛，也挺好的。</b></p>
   </div>
 
   <div style="display:flex;justify-content: center;margin-top: 32px;flex-direction: row;">
     <Button rounded style="width: 130px; height: 40px;">
       <AngleDoubleRight :size="22" />
-      Get Start
+      逛市集
     </Button>
     <Button rounded style="width: 130px; height: 40px;margin-left: 8px;">
       <Github :size="22" />
@@ -77,11 +80,16 @@ function handleLeave() {
   margin-top: 48px;
 }
 
-
+.slogan p{
+  margin: 0;
+}
 .slogan {
+  margin: 16px;
   text-align: center;
   font-family: 'Round', system-ui, sans-serif;
+  display: flex;
   font-size: 16px;
+  flex-direction: column;
 }
 
 .title-wrap {

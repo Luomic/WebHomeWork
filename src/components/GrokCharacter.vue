@@ -67,12 +67,9 @@ const rootStyle = computed(() => {
     '--grok-size': `${props.size}px`,
   }
   if (props.plate) {
-    // --disk 会顺着继承被眼睛镂空路径读到（引擎把 --bg 设成了
-    // var(--sand-bg-base, var(--disk, #f3efe6))）
     style['--grok-plate'] = props.plate
     style['--disk'] = props.plate
   }
-  // color-scheme 只为了 light-dark() 有确定的取值方向；底板颜色是显式写的，不受它影响
   if (props.scheme !== 'inherit') style['color-scheme'] = props.scheme
   return style
 })
@@ -155,13 +152,11 @@ defineExpose({
   setPaused: (v: boolean) => bot?.setPaused(v),
   setEmphasis: (v: boolean) => bot?.setEmphasis(v),
   setFollowPointer: (v: boolean) => bot?.setFollowPointer(v),
-  /** 视线锁定到视口坐标上的某点（传 null 解除） */
   setGazeTarget: (pt: { x: number; y: number } | null) => bot?.setGazeTarget(pt),
   spinOnce: (turns = 1) => bot?.spinOnce(turns),
   bounceOnce: () => bot?.bounceOnce(),
   burstOnce: () => bot?.burstOnce(),
   snapshot: (): GrokSnapshot | undefined => bot?.snapshot(),
-  /** 逃生舱：拿到引擎实例本身 */
   getEngine: () => bot,
 })
 </script>
@@ -176,7 +171,7 @@ defineExpose({
 <style scoped>
 .grok-character {
   --grok-size: 96px;
-  /* 原版登录页里角色约占圆盘的 68% */
+  /* 盘子大小 */
   --grok-plate-size: calc(var(--grok-size) / 0.68);
 
   position: relative;
@@ -185,10 +180,8 @@ defineExpose({
   inline-size: var(--grok-plate-size);
   block-size: var(--grok-plate-size);
 
-  /* 尺寸由 size 决定，别让 flex 容器把圆盘压成椭圆 */
   flex: none;
 
-  /* color-scheme 只为 light-dark() 定方向，显式清掉背景免得被它带出色块 */
   background: transparent;
 }
 
@@ -197,21 +190,14 @@ defineExpose({
   inset: 0;
   border-radius: 50%;
   background: var(--grok-plate, transparent);
-  box-shadow: var(
-    --grok-plate-shadow,
-    inset 0 -8px 18px rgba(40, 30, 10, 0.08),
-    0 12px 28px rgba(0, 0, 0, 0.3)
-  );
+  
 }
 
 .grok-character__svg {
   position: relative;
   inline-size: var(--grok-size);
   block-size: var(--grok-size);
-
-  /* 引擎会把粒子、覆盖层画到 viewBox 外面去 */
   overflow: visible;
   background: transparent;
-  /* 引擎自己写 style 上的 transform / --fg / --bg，这里不要碰 */
 }
 </style>
