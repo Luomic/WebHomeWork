@@ -8,6 +8,7 @@ import DotWave from '@/components/DotWave.vue'
 import AngleDoubleRight from '@primeicons/vue/angle-double-right'
 import Github from '@primeicons/vue/github'
 import GrokCharacter from '@/components/GrokCharacter.vue'
+import router from '@/router'
 
 
 const whiteColor = ref('#fff')
@@ -39,47 +40,47 @@ function handleLeave() {
 </script>
 
 <template>
+  <div class="welcome">
+    <!--这个是背景波纹-->
+    <DotWave />
+    <div class="button-group">
+      <Button rounded class="button-get" @click="$router.push('./home')">
+        <AngleDoubleRight :size="22" />
+        逛市集
+      </Button>
+      <Button rounded class="button-gett">
+        <Github :size="22" />
+        Github
+      </Button>
+    </div>
+    <div class="hero">
+      <div class="left-title">
+        <div ref="titleWrap" class="title-wrap" @pointermove="handlePointer" @pointerleave="handleLeave">
+          <p class="title-text">孤独市集</p>
+          <div class="lamp"></div>
+        </div>
 
-  <!--这个是背景波纹-->
-  <DotWave />
-  <div class="button-group">
-    <Button rounded class="button-get">
-      <AngleDoubleRight :size="22" />
-      逛市集
-    </Button>
-    <Button rounded class="button-gett">
-      <Github :size="22" />
-      Github
-    </Button>
-  </div>
-  <div class="hero">
-    <div class="left-title">
-      <div ref="titleWrap" class="title-wrap" @pointermove="handlePointer" @pointerleave="handleLeave">
-        <p class="title-text">孤独市集</p>
-        <div class="lamp"></div>
+        <div class="slogan">
+          欢迎来到孤独市集，
+          一个人也可以逛的校园二手市集。<br>
+          这里有一些闲置的东西，
+          一些正在寻找新主人的东西。<br>
+          或许......可能还会有一些神秘的珍藏？随便看看，说不定就能淘到点好玩的。
+        </div>
       </div>
 
-      <div class="slogan">
-        欢迎来到孤独市集，
-        一个人也可以逛的校园二手市集。<br>
-        这里有一些闲置的东西，
-        一些正在寻找新主人的东西。<br>
-        或许......可能还会有一些神秘的珍藏？随便看看，说不定就能淘到点好玩的。
+      <div class="right-title">
+        <GrokCharacter mode="onboarding" :size="120" :plate="whiteColor" style="margin-top: 16px;" />
+        <div class="re-text">
+          <p class="re-content">其实，我想说：</p>
+          <br>
+          <p class="re-content"><b>一个人逛，也挺好的。</b></p>
+        </div>
       </div>
     </div>
 
-    <div class="right-title">
-      <GrokCharacter mode="onboarding" :size="120" :plate="whiteColor" style="margin-top: 16px;" />
-      <div class="re-text">
-        <p class="re-content">其实，我想说：</p>
-        <br>
-        <p class="re-content"><b>一个人逛，也挺好的。</b></p>
-      </div>
-    </div>
+    <Marquee class="marquee-row" :images="posters" :seconds-per-card="7" borderRadius="20px" />
   </div>
-
-  <!-- 卡片视图：无缝向左循环流动 -->
-  <Marquee class="marquee-row" :images="posters" :seconds-per-card="7" borderRadius="20px" />
 </template>
 
 <style scoped>
@@ -117,7 +118,7 @@ function handleLeave() {
 }
 
 .marquee-row {
-  margin-top: 64px;
+  margin-top: 128px;
   margin-left: 32px;
 }
 
@@ -176,7 +177,7 @@ function handleLeave() {
     margin: 0;
   }
 
-  :global(#app) {
+  .welcome {
     display: flex;
     flex-direction: column;
     padding-bottom: 40px;
@@ -245,13 +246,13 @@ function handleLeave() {
     margin: 0;
   }
 
-  :global(#app) {
+  .welcome {
     display: flex;
     flex-direction: column;
     padding-bottom: 32px;
   }
 
-  :global(#app .dot-wave) {
+  :global(.welcome .dot-wave) {
     position: fixed;
   }
 

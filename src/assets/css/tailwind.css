@@ -1,0 +1,10 @@
+@import "tailwindcss";
+@import "tailwindcss-primeui";
+
+@custom-variant dark (&:where(.to-dark, .to-dark *));
+
+@layer base {
+  body {
+    margin: 8px;
+  }
+}

@@ -38,7 +38,6 @@
 - ~~欢迎页面的流动式卡片~~
 - ~~欢迎页面的 `Agent` 组件~~
 - ~~欢迎页面的响应式布局~~
-- `Divider` 的 Footer
 - 正式页面 `sliderDrawer`,`MainLayout`
 - 登录/注册 页面
 - `Hcaptcha`
@@ -59,3 +58,4 @@
 - [犬仓丸丘 - Apache许可](https://mp.weixin.qq.com/s/WSUVkeDJXu5bYnNTltvpzA)
 - [Grok-icon-study](https://github.com/blessonism/grok-icon-study)
 - [Primevue](https://primevue.dev/)
+- Tailwind CSS
