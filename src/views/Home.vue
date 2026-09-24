@@ -24,7 +24,7 @@
                                         <div
                                             class="flex size-6 shrink-0 items-center justify-center rounded-md bg-linear-to-br from-violet-500 to-indigo-600 text-white text-xs font-bold leading-none">
                                             Hi</div>
-                                        <span class="font-semibold text-sm">孤独市集</span>
+                                        <span class="font-semibold text-sm">新朋友</span>
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                             </SidebarMenu>
@@ -36,19 +36,22 @@
                                 <SidebarGroupContent>
                                     <SidebarMenu>
                                         <SidebarMenuItem>
-                                            <SidebarMenuButton :isActive="true">
+                                            <SidebarMenuButton as="router-link" :to="{ name: 'home-main' }"
+                                                :isActive="$route.name === 'home-main'">
                                                 <Home />
                                                 <span>首页</span>
                                             </SidebarMenuButton>
                                         </SidebarMenuItem>
                                         <SidebarMenuItem>
-                                            <SidebarMenuButton>
+                                            <SidebarMenuButton as="router-link" :to="{ name: 'home-message' }"
+                                                :isActive="$route.name === 'home-message'">
                                                 <Inbox />
                                                 <span>消息</span>
                                             </SidebarMenuButton>
                                         </SidebarMenuItem>
                                         <SidebarMenuItem>
-                                            <SidebarMenuButton>
+                                            <SidebarMenuButton as="router-link" :to="{ name: 'home-agent' }"
+                                                :isActive="$route.name === 'home-agent'">
                                                 <Sparkles />
                                                 <span>Agent</span>
                                             </SidebarMenuButton>
@@ -62,7 +65,8 @@
                                 <SidebarGroupContent>
                                     <SidebarMenu>
                                         <SidebarMenuItem>
-                                            <SidebarMenuButton>
+                                            <SidebarMenuButton as="router-link" :to="{ name: 'home-map' }"
+                                                :isActive="$route.name === 'home-map'">
                                                 <MapMarker />
                                                 <span>地图</span>
                                             </SidebarMenuButton>
@@ -92,12 +96,10 @@
                     <SidebarTrigger target="nav" severity="secondary" :text="true" size="small">
                         <SidebarIcon />
                     </SidebarTrigger>
-                    <span class="text-sm font-medium flex-1">Dashboard</span>
+                    <span class="text-sm font-medium flex-1">孤独市集</span>
                 </header>
-                <div class="flex-1 p-4 flex flex-col gap-4">
-                    
-                    <div class="rounded-lg bg-surface-100 dark:bg-surface-800 h-48"></div>
-                    <div class="rounded-lg bg-surface-100 dark:bg-surface-800 flex-1"></div>
+                <div class="flex-1 flex flex-col min-h-0">
+                    <RouterView />
                 </div>
             </SidebarMain>
         </SidebarLayout>
@@ -106,6 +108,7 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { RouterView } from 'vue-router';
 import Sidebar from 'primevue/sidebar';
 import SidebarAside from 'primevue/sidebaraside';
 import SidebarBackdrop from 'primevue/sidebarbackdrop';
