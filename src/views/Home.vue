@@ -53,7 +53,7 @@
                                             <SidebarMenuButton as="router-link" :to="{ name: 'home-agent' }"
                                                 :isActive="$route.name === 'home-agent'">
                                                 <Sparkles />
-                                                <span>Agent</span>
+                                                <span>JhFair</span>
                                             </SidebarMenuButton>
                                         </SidebarMenuItem>
                                     </SidebarMenu>
@@ -79,7 +79,7 @@
                         <SidebarFooter>
                             <SidebarMenu>
                                 <SidebarMenuItem>
-                                    <SidebarMenuButton>
+                                    <SidebarMenuButton @click="loginVisible = true" aria-label="账户登录">
                                         <User />
                                         <span>账户</span>
                                     </SidebarMenuButton>
@@ -97,18 +97,22 @@
                         <SidebarIcon />
                     </SidebarTrigger>
                     <span class="text-sm font-medium flex-1">孤独市集</span>
+                    <Button label="登录" size="small" severity="contrast" rounded @click="loginVisible = true" />
                 </header>
                 <div class="flex-1 flex flex-col min-h-0">
                     <RouterView />
                 </div>
             </SidebarMain>
         </SidebarLayout>
+        <LoginDialog v-model:visible="loginVisible" />
     </div>
 </template>
 
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { RouterView } from 'vue-router';
+import Button from 'primevue/button';
+import LoginDialog from '@/components/LoginDialog.vue';
 import Sidebar from 'primevue/sidebar';
 import SidebarAside from 'primevue/sidebaraside';
 import SidebarBackdrop from 'primevue/sidebarbackdrop';
@@ -147,6 +151,7 @@ import User from '@primeicons/vue/user';
 
 
 const isMobile = ref(false);
+const loginVisible = ref(false);
 const navOpen = ref(true);
 const open = ref(false);
 let mql = null;

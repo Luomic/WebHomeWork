@@ -1,6 +1,6 @@
 # 欢迎拷打喵
 
-上云链接：[孤独市集](https://school.ccccocccc.cc/?i=1)
+上云链接：[孤独市集](http://jhfair.shop/)
 
 # 欢迎来到 孤独市集
 

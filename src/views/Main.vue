@@ -8,22 +8,6 @@ import Plus from '@primeicons/vue/plus'
 
 const posters = Array.from({ length: 6 }, (_, i) => `/placeholder/${i + 1}.webp`)
 
-const titleWrap = useTemplateRef('titleWrap')
-
-function handlePointer(e) {
-  const el = titleWrap.value
-  if (!el) return
-  const rect = el.getBoundingClientRect()
-  el.style.setProperty('--x', `${e.clientX - rect.left}px`)
-  el.style.setProperty('--y', `${e.clientY - rect.top}px`)
-}
-
-function handleLeave() {
-  const el = titleWrap.value
-  if (!el) return
-  el.style.setProperty('--x', '-200px')
-  el.style.setProperty('--y', '-200px')
-}
 </script>
 
 <template>
@@ -31,9 +15,8 @@ function handleLeave() {
     <DotWave />
 
     <div class="hero">
-      <div ref="titleWrap" class="title-wrap" @pointermove="handlePointer" @pointerleave="handleLeave">
+      <div class="title-wrap">
         <p class="title-text">逛市集</p>
-        <div class="lamp"></div>
       </div>
 
       <p class="slogan">
@@ -96,14 +79,6 @@ function handleLeave() {
   letter-spacing: 2px;
 }
 
-.lamp {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: #fff;
-  mix-blend-mode: difference;
-  clip-path: circle(34px at var(--x, -200px) var(--y, -200px));
-}
 
 .slogan {
   margin: 14px 0 0;
