@@ -1,7 +1,7 @@
 <!-- 本页面不处理任何实际数据，仅作欢迎页面 -->
 
 <script setup lang="ts">
-import { ref, useTemplateRef } from 'vue'
+import { computed, inject, ref, useTemplateRef } from 'vue'
 import Button from 'primevue/button'
 import Marquee from '@/components/Marquee.vue'
 import DotWave from '@/components/DotWave.vue'
@@ -11,7 +11,10 @@ import GrokCharacter from '@/components/GrokCharacter.vue'
 import router from '@/router'
 
 
-const whiteColor = ref('#fff')
+// 背板跟随全局主题，避免暗色模式下仍然保留一块刺眼的白圆盘。
+const isDark = inject('isDark', ref(false))
+const plateColor = computed(() => isDark.value ? '#292722' : '#f7f5ef')
+const grokScheme = computed(() => isDark.value ? 'dark' : 'light')
 
 const posters = [
   '/placeholder/1.webp',
@@ -70,7 +73,7 @@ function handleLeave() {
       </div>
 
       <div class="right-title">
-        <GrokCharacter mode="onboarding" :size="120" :plate="whiteColor" style="margin-top: 16px;" />
+        <GrokCharacter mode="onboarding" :size="120" :scheme="grokScheme" :plate="plateColor" style="margin-top: 16px;" />
         <div class="re-text">
           <p class="re-content">其实，我想说：</p>
           <br>
@@ -84,6 +87,7 @@ function handleLeave() {
 </template>
 
 <style scoped>
+.welcome { min-height: 100vh; box-sizing: border-box; overflow: hidden; background: var(--app-bg, #f7f5ef); color: var(--app-text, #24231f); }
 
 .hero {
   display: flex;

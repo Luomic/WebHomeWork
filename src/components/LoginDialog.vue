@@ -28,6 +28,7 @@ watch(visible, () => {
 </script>
 
 <template>
+  <!-- pt (pass-through) 用来给 PrimeVue 内部 root 节点追加 class，便于局部样式覆盖。 -->
   <Dialog v-model:visible="visible" modal header="登录孤独市集" :draggable="false"
     :style="{ width: '27rem', maxWidth: 'calc(100vw - 2rem)' }"
     :pt="{ root: { class: 'market-login-dialog' } }">

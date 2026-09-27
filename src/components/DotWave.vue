@@ -81,7 +81,7 @@ function mount(canvas: HTMLCanvasElement) {
   let height = 0
   let frame = 0
   let ticking = false
-  let dotColor = '#ffffff'
+  let dotColor = '#24231f'
   let raf = 0
 
   function resize() {
@@ -209,7 +209,8 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
 
-  background: Canvas;
+  background: transparent;
+  color: var(--app-text, #24231f);
 
   mask-image: var(--dot-wave-fade);
   -webkit-mask-image: var(--dot-wave-fade);
