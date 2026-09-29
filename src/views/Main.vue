@@ -1,54 +1,120 @@
 <script setup>
-import { computed, inject, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+/*
+ * 逛市集页（/home/main）：商品/种草的瀑布流信息流。
+ *
+ * 瀑布流实现（纯 CSS 网格 + JS 量高，不引库）：
+ *   .feed-grid 的 grid-auto-rows 是 8px —— 每个格子高 8px，卡片通过
+ *   gridRowEnd = span N 占 N 个格子。measure() 量出每张卡的真实高度，
+ *   换算成"需要几个 8px"，于是矮卡占行少、高卡占行多，形成错落效果。
+ *   图片加载完高度会变，所以用 ResizeObserver 盯着每张卡重算。
+ *
+ * 状态存放在 data/market.ts 的 browseState（模块级单例）：
+ * 切去别的页面再回来，搜索词、分类、滚动位置都还在。
+ */
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+// useRouter：在脚本里拿路由实例（模板里才是 $router）
+import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
-
-const openPost = inject('openPost')
-const filter = ref('全部')
-const selected = ref(null)
-const finds = [
-  { id: '01', title: '留一盏灯，给晚归的灵感。', name: '宿舍台灯', category: '生活', price: 25, note: '陪过几次期末周，也想陪你读下一本书。' },
-  { id: '02', title: '翻过的书，还能有新故事。', name: '英语词典', category: '书籍', price: 12, note: '少量铅笔笔记，留给正在准备考试的你。' },
-  { id: '03', title: '把下一行，敲给新生活。', name: '蓝牙键盘', category: '数码', price: 60, note: '轻巧的桌面搭档，想找一张新的自习桌。' },
-]
-const visibleFinds = computed(() => finds.filter(item => filter.value === '全部' || item.category === filter.value))
+import InputText from 'primevue/inputtext'
+import Select from 'primevue/select'
+import SelectButton from 'primevue/selectbutton'
+import { Search, MapPin, SearchX } from 'lucide-vue-next'
+import MarketCard from '@/components/MarketCard.vue'
+import MarketDetail from '@/components/MarketDetail.vue'
+// 数据源 + 共享浏览状态（切换页面后搜索/滚动仍保留）
+import { marketItems, categories, browseState } from '@/data/market'
+const router = useRouter()
+// 三个模板元素/状态：pageEl=滚动容器；gridEl=瀑布流网格；selected=详情弹窗的商品
+const pageEl = ref(null), gridEl = ref(null), selected = ref(null)
+// 标记"正在切类型"，滚动事件里用来区分（见 changeKind）
+let switchingKind = false
+// SelectButton / Select 的选项数据
+const kinds = [{ label: '闲置', value: 'idle' }, { label: '种草', value: 'recommend' }]
+const sorts = [{ label: '默认顺序', value: 'default' }, { label: '价格从低到高', value: 'price' }]
+// 搜索词跟着"闲置/种草"分开记：切类型不会把另一类的关键词冲掉。
+// get：读时按当前类型取对应字段；set：写时也写进对应字段——computed 的 get/set 用法
+const query = computed({ get: () => browseState.kind === 'idle' ? browseState.idleQuery : browseState.recommendQuery, set: value => { if (browseState.kind === 'idle') browseState.idleQuery = value; else browseState.recommendQuery = value } })
+// 过滤链：类型 → 分类（种草不分分类）→ 关键词（标题和地点都搜）；
+// 闲置且选了价格排序时再排。sort() 会原地改数组，但这里排的是 filter 出来的新数组，安全。
+const visibleItems = computed(() => {
+  // toLocaleLowerCase：大小写不敏感搜索
+  const needle = query.value.trim().toLocaleLowerCase()
+  const list = marketItems.filter(item => item.kind === browseState.kind && (item.kind === 'recommend' || browseState.category === '全部' || item.category === browseState.category) && (item.title + item.place).toLocaleLowerCase().includes(needle))
+  // sort 的比较函数：a.price - b.price，负数排前 → 升序
+  return browseState.kind === 'idle' && browseState.sort === 'price' ? list.sort((a, b) => a.price - b.price) : list
+})
+let observer, frame   // ResizeObserver 实例 / rAF 的 id
+// 瀑布流核心：量出每张卡的实际高度，换算成"占几个 8px 格子"写回 gridRowEnd。
+// 用 requestAnimationFrame 合并一帧内的多次触发（图片连续加载完成时会连着调）。
+function measure() {
+  cancelAnimationFrame(frame)   // 取消上一次排队中的计算
+  frame = requestAnimationFrame(() => {
+    if (!gridEl.value) return
+    // rowGap：从计算样式里读出行间距（CSS 改了这里自动跟上）
+    const gap = parseFloat(getComputedStyle(gridEl.value).rowGap)
+    // querySelectorAll：找网格里所有卡片单元；forEach 逐个量高
+    gridEl.value.querySelectorAll('.feed-cell').forEach(cell => {
+      // firstElementChild：单元里的 MarketCard 根元素；?. 防空
+      const height = cell.firstElementChild?.getBoundingClientRect().height ?? 0
+      // span N：跨 N 个 8px 行——Math.ceil 向上取整保证装得下
+      cell.style.gridRowEnd = 'span ' + Math.ceil((height + gap) / (8 + gap))
+    })
+  })
+}
+// 等 DOM 更新后，让 ResizeObserver 盯住所有新卡片（图片加载完高度变了会自动重排）。
+async function observeCards() { await nextTick(); observer?.disconnect(); gridEl.value?.querySelectorAll('.market-card').forEach(el => observer?.observe(el)); measure() }
+// 跳去地图页：带选中商品 id，或带上当前搜索词和分类，让地图页延续这里的筛选。
+// router.push 的 query 参数会出现在 URL ?item=xxx 里
+function openMap(item) { selected.value = null; router.push({ name: 'home-map', query: item ? { item: item.id } : { q: browseState.idleQuery, category: browseState.category } }) }
+// 切换闲置/种草：先把当前类的滚动位置存起来（回来时还原），再换类型。
+// switchingKind 标记"这次滚动事件是切类引起的"，避免把 0 错存进 browseState。
+function changeKind(kind) {
+  if (!kind || kind === browseState.kind) return
+  if (pageEl.value) browseState.scroll[browseState.kind] = pageEl.value.scrollTop
+  switchingKind = true
+  browseState.kind = kind
+}
+// 页面滚动时存位置（切类引起的那次跳过）；event.target = 滚动的容器
+function saveScroll(event) { if (!switchingKind) browseState.scroll[browseState.kind] = event.target.scrollTop }
+async function restoreFeed() {
+  await observeCards()
+  // 等行高写回后恢复位置，避免瀑布流尚未撑开时 scrollTop 被截断。
+  requestAnimationFrame(() => { if (pageEl.value) pageEl.value.scrollTop = browseState.scroll[browseState.kind]; switchingKind = false })
+}
+// 可见列表一变（搜索/筛选）就重新挂观察器重排
+watch(visibleItems, observeCards)
+onMounted(async () => { switchingKind = true; observer = new ResizeObserver(measure); await restoreFeed() })
+onBeforeUnmount(() => { observer?.disconnect(); cancelAnimationFrame(frame) })   // 清理防泄漏
 </script>
-
 <template>
-  <main class="main-page">
-    <div class="edition"><span>孤独市集 / 校园生活小报</span><span>闲置 · 邀约 · 一次新的相遇</span></div>
-    <section class="opening">
-      <div class="headline"><p class="kicker">不赶时间，逛一会儿。</p><h1>你的闲置，<br>别人的<span>刚刚好。</span></h1><p class="intro">让用不上的东西继续被喜欢，<br>让想做的事情多一个人一起。</p></div>
-      <aside class="invite-note"><span class="note-number">TO / 校园里的你</span><h2>这里还缺<br>你的一张便签。</h2><p>一件想转手的好物，<br>一个想约人一起的下午。</p><Button label="＋ 写个帖子" unstyled class="ink-button" @click="openPost()" /><small>闲置与邀约，都欢迎。</small></aside>
-    </section>
-    <section class="board">
-      <div class="finds">
-        <header class="section-heading"><div><span class="section-number">01 /</span><h2>闲置有下文</h2></div><RouterLink :to="{ name: 'home-map' }">到附近看看 ↗</RouterLink></header>
-        <div class="filter-row"><div class="filters" aria-label="闲置分类"><button v-for="name in ['全部', '生活', '书籍', '数码']" :key="name" :aria-pressed="filter === name" @click="filter = name">{{ name }}</button></div><span>示例内容</span></div>
-        <button v-for="item in visibleFinds" :key="item.id" class="find-row" :aria-expanded="selected === item.id" @click="selected = selected === item.id ? null : item.id">
-          <span class="find-index">{{ item.id }}</span><div class="find-copy"><small>{{ item.category }} / {{ item.name }}</small><h3>{{ item.title }}</h3><p v-if="selected === item.id">{{ item.note }}<br>此为示例闲置，尚未接入商品详情。</p></div><span class="price">¥{{ item.price }}<small>{{ selected === item.id ? '收起 −' : '展开 ↗' }}</small></span>
-        </button>
-        <p class="footnote">旧物不旧，只是故事换了一个主角。</p>
-      </div>
-      <aside class="meetups"><header class="section-heading"><div><span class="section-number">02 /</span><h2>找个人，一起</h2></div></header><span class="sample-label">邀约灵感 · 非真实活动</span><article><small>傍晚 / 校园散步</small><h3>今天的晚风，<br>要不要一起吹？</h3><p>不必有目的地，走到天色慢慢暗下来。</p></article><article><small>周末 / 自习搭子</small><h3>各自努力，<br>休息时聊两句。</h3><p>带上那本一直没翻完的书。</p></article><Button label="发起我的邀约 ↗" unstyled class="text-button" @click="openPost('邀约')" /></aside>
-    </section>
-    <footer class="page-footer"><span>让物品流动，让相遇发生。</span><span>JH FAIR / 孤独市集</span></footer>
+  <!-- 页面滚动容器：ref 交给脚本存滚动位置；@scroll 每次滚动上报 -->
+  <main ref="pageEl" class="main-page" @scroll="saveScroll">
+    <div class="feed-container">
+      <header class="feed-heading"><div><p class="page-context">校园闲置与附近的好地方</p><h1>逛市集</h1></div><span class="campus-name"><MapPin :size="15" aria-hidden="true" />朝晖校区</span></header>
+      <!-- 工具行：搜索框（label 包裹=点图标也能聚焦）+ 地图入口按钮 -->
+      <div class="feed-toolbar"><label class="search-field"><Search :size="18" aria-hidden="true" /><InputText v-model="query" :aria-label="browseState.kind === 'idle' ? '搜索闲置' : '搜索种草'" :placeholder="browseState.kind === 'idle' ? '搜索想找的闲置' : '搜索附近值得去的地方'" /></label><Button v-if="browseState.kind === 'idle'" severity="secondary" outlined class="map-link" aria-label="地图找商品" @click="openMap()"><MapPin :size="16" aria-hidden="true" /><span>地图找商品</span></Button></div>
+      <!-- 闲置/种草切换：SelectButton 是一组互斥按钮；:allowEmpty="false" 不允许全不选 -->
+      <div class="content-switch"><SelectButton :modelValue="browseState.kind" :options="kinds" optionLabel="label" optionValue="value" :allowEmpty="false" aria-label="浏览闲置或种草" @update:modelValue="changeKind" /><span class="sample-note">示例内容 · 未接入真实数据</span></div>
+      <!-- 闲置专属：分类按钮列 + 排序下拉；种草时换成提示文字 -->
+      <div v-if="browseState.kind === 'idle'" class="feed-filters"><div class="category-list" aria-label="商品分类"><Button v-for="name in categories" :key="name" unstyled class="category-button" :class="{ active: browseState.category === name }" :aria-pressed="browseState.category === name" @click="browseState.category = name">{{ name }}</Button></div><Select v-model="browseState.sort" :options="sorts" optionLabel="label" optionValue="value" aria-label="商品排序" size="small" class="sort-select" /></div>
+      <p v-else class="recommend-note">记录值得去的地方。种草不参与商品地图和交易筛选。</p>
+      <!-- :key=browseState.kind：切类型时整个列表区做淡入淡出；
+           @after-enter：进场动画结束后再恢复滚动位置（此时布局已稳定） -->
+      <Transition name="feed-fade" mode="out-in" @after-enter="restoreFeed">
+        <section :key="browseState.kind" :aria-label="browseState.kind === 'idle' ? '闲置商品' : '附近种草'">
+          <!-- 瀑布流网格：每张卡包一层 .feed-cell，measure() 负责给 cell 写跨行数；
+               @open：卡片点击事件 → 把商品存进 selected 打开详情 -->
+          <div ref="gridEl" class="feed-grid"><article v-for="item in visibleItems" :key="item.id" class="feed-cell"><MarketCard :item="item" @open="selected = $event" /></article></div>
+          <!-- 空状态：role="status" 让读屏播报"没有结果" -->
+          <div v-if="!visibleItems.length" class="feed-empty" role="status"><SearchX :size="32" aria-hidden="true" /><h2>暂时没有匹配的内容</h2><p>换个关键词，或者清除当前筛选。</p><Button label="清除筛选" severity="secondary" @click="query = ''; browseState.category = '全部'" /></div>
+        </section>
+      </Transition>
+      <footer class="feed-footer">{{ visibleItems.length }} 条示例内容 · 已全部展示</footer>
+    </div>
+    <!-- 详情弹窗：item 传 null 即关闭；@map：详情里点"在地图查看" → 跳地图页 -->
+    <MarketDetail :item="selected" @close="selected = null" @map="openMap" />
   </main>
 </template>
-
 <style scoped>
-.main-page { flex: 1; min-height: 0; min-width: 0; overflow: auto; background: var(--app-bg, #f5f1e8); color: var(--app-text, #20201e); padding: 26px clamp(22px, 5vw, 72px) 20px; font-family: 'Round', system-ui, sans-serif; }
-.edition { display: flex; justify-content: space-between; gap: 16px; border-bottom: 1px solid #b9b9b2; padding-bottom: 15px; font-size: 10px; color: #777; letter-spacing: 1px; }
-.opening { display: grid; grid-template-columns: 1.5fr 1fr; gap: 40px; align-items: center; padding: 38px 0 42px; }
-.kicker { font-size: 12px; color: #777; margin: 0 0 18px; }
-h1 { font-family: 'Ding', system-ui, sans-serif; font-size: clamp(34px, 4.3vw, 62px); line-height: 1.4; font-weight: normal; margin: 0; letter-spacing: 1px; }
-h1 span { border-bottom: 2px solid #aaa; padding-bottom: 3px; }.intro { font-size: 13px; line-height: 1.9; color: #777; margin: 20px 0 0; }
-.invite-note { width: 100%; max-width: 310px; justify-self: end; background: color-mix(in srgb, var(--app-surface) 86%, var(--app-text)); border: 1px solid var(--app-border); padding: 26px; transform: rotate(2deg); position: relative; }
-.invite-note::before { content: ''; position: absolute; width: 75px; height: 19px; background: color-mix(in srgb, var(--app-border) 70%, transparent); top: -10px; left: 36%; transform: rotate(-5deg); }
-.note-number { font-size: 10px; letter-spacing: 1px; color: color-mix(in srgb, var(--app-text) 60%, transparent); }.invite-note h2 { font-size: 25px; font-weight: normal; line-height: 1.5; margin: 20px 0 12px; }.invite-note p { font-size: 12px; color: color-mix(in srgb, var(--app-text) 60%, transparent); line-height: 1.8; }.ink-button { margin-top: 14px; padding: 10px 18px; background: var(--app-text); color: var(--app-bg); border: 0; border-radius: 6px; font: inherit; font-size: 13px; cursor: pointer; }.invite-note > small { display: block; font-size: 10px; color: color-mix(in srgb, var(--app-text) 60%, transparent); margin-top: 14px; }
-.board { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(220px, 1fr); gap: 36px; border-top: 2px solid #333; padding-top: 22px; }.section-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; }.section-heading > div { display: flex; align-items: baseline; gap: 12px; }.section-number { font-size: 11px; color: #999; }.section-heading h2 { font-size: 20px; font-weight: normal; margin: 0; }.section-heading a { color: #666; font-size: 11px; text-decoration: none; white-space: nowrap; }.filter-row { display: flex; align-items: center; justify-content: space-between; margin-top: 20px; }.filter-row > span, .sample-label { color: #999; font-size: 10px; }.filters { display: flex; gap: 16px; }.filters button { border: 0; border-bottom: 1px solid transparent; padding: 4px 0; background: none; color: #999; font: inherit; font-size: 12px; cursor: pointer; }.filters button[aria-pressed=true] { color: #111; border-color: #111; }
-.find-row { display: flex; align-items: center; width: 100%; gap: 16px; text-align: left; padding: 23px 0; border: 0; border-bottom: 1px solid #d9d9d2; background: none; font: inherit; cursor: pointer; }.find-row:hover .find-copy h3 { text-decoration: underline; text-underline-offset: 5px; }.find-index { color: #aaa; font-size: 11px; }.find-copy { flex: 1; }.find-copy small { color: #888; font-size: 10px; }.find-copy h3 { font-size: 16px; font-weight: normal; line-height: 1.7; margin: 7px 0 0; }.find-copy p { font-size: 12px; color: #777; line-height: 1.8; }.price { font-size: 21px; }.price small { display: block; color: #999; font-size: 10px; margin-top: 6px; }.footnote { font-size: 11px; color: #999; margin-top: 18px; }
-.meetups { border-left: 1px solid #d9d9d2; padding-left: 30px; }.sample-label { display: block; margin-top: 20px; }.meetups article { padding: 23px 0 18px; border-bottom: 1px dashed #ccc; }.meetups article small { font-size: 10px; color: #888; }.meetups h3 { font-size: 20px; line-height: 1.6; font-weight: normal; margin: 10px 0; }.meetups p { color: #888; font-size: 11px; line-height: 1.8; }.text-button { font: inherit; font-size: 12px; padding: 18px 0 0; border: 0; background: none; cursor: pointer; }.page-footer { display: flex; justify-content: space-between; gap: 15px; margin-top: 36px; padding-top: 18px; border-top: 1px solid #b9b9b2; font-size: 10px; color: #888; }
-button:focus-visible, a:focus-visible { outline: 2px solid #999; outline-offset: 4px; }
-@media(max-width: 750px) { .opening { grid-template-columns: 1fr; gap: 30px; }.invite-note { max-width: none; transform: none; }.board { grid-template-columns: 1fr; gap: 24px; }.meetups { padding-left: 0; border-left: 0; border-top: 1px solid #bbb; padding-top: 22px; }.edition span:last-child { display: none; }h1 { font-size: 42px; }.find-row { gap: 10px; }.page-footer { flex-wrap: wrap; } }
+.main-page{flex:1;min-height:0;min-width:0;overflow:auto;background:var(--app-bg);color:var(--app-text);font:14px/1.5 system-ui,sans-serif;scrollbar-gutter:stable}.feed-container{max-width:1320px;margin:0 auto;padding:28px clamp(16px,3vw,40px) 24px}.feed-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;gap:16px}.feed-heading h1{font-size:24px;font-weight:650;margin:4px 0 0;letter-spacing:-.5px}.page-context{margin:0;color:var(--app-muted);font-size:12px}.campus-name{display:flex;gap:5px;align-items:center;font-size:12px;color:var(--app-muted)}.feed-toolbar{display:flex;gap:12px;margin-bottom:24px}.search-field{position:relative;flex:1;min-width:0}.search-field>svg{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--app-muted);z-index:1;pointer-events:none}.search-field :deep(input){width:100%;padding-left:40px}.map-link{white-space:nowrap}.content-switch{display:flex;align-items:center;justify-content:space-between;padding-bottom:18px;border-bottom:1px solid var(--app-border);gap:10px}.sample-note{font-size:11px;color:var(--app-muted)}.feed-filters{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:18px 0 22px}.category-list{display:flex;gap:22px;overflow-x:auto;min-width:0}.category-button{border:0;border-bottom:2px solid transparent;padding:6px 0;background:none;color:var(--app-muted);font:inherit;white-space:nowrap;cursor:pointer;transition:color .16s,border-color .16s}.category-button.active{color:var(--app-text);border-color:var(--app-text)}.category-button:focus-visible{outline:2px solid var(--app-text);outline-offset:2px}.sort-select{min-width:132px}.recommend-note{font-size:12px;color:var(--app-muted);margin:20px 0}.feed-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:8px;gap:20px;align-items:start}.feed-cell{min-width:0}.feed-empty{padding:64px 20px;display:flex;flex-direction:column;align-items:center;text-align:center;color:var(--app-muted);gap:12px}.feed-empty h2{font-size:17px;margin:0;color:var(--app-text)}.feed-empty p{margin:0 0 8px}.feed-footer{text-align:center;margin-top:36px;font-size:11px;color:var(--app-muted)}.feed-fade-enter-active,.feed-fade-leave-active{transition:opacity .16s ease,transform .16s ease}.feed-fade-enter-from{opacity:0;transform:translateY(5px)}.feed-fade-leave-to{opacity:0}@media(max-width:1200px){.feed-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:740px){.feed-container{padding:22px 16px}.feed-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.feed-heading{margin-bottom:18px}.feed-heading h1{font-size:22px}.map-link span{display:none}.feed-toolbar{margin-bottom:18px}.sample-note{font-size:10px}.feed-filters{flex-wrap:wrap;gap:10px}.category-list{flex:1;gap:18px}.sort-select{min-width:115px;max-width:140px}}@media(max-width:340px){.feed-grid{grid-template-columns:1fr}}@media(prefers-reduced-motion:reduce){.feed-fade-enter-active,.feed-fade-leave-active,.category-button{transition:none}.feed-fade-enter-from{transform:none}}
 </style>

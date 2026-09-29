@@ -1,222 +1,226 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+/*
+ * 附近商品地图页（/home/map，可从市集页"地图找商品"带搜索词跳过来）。
+ *
+ * 布局：左侧商品列表面板 + 右侧高德地图。手机端（≤760px）列表变成底部抽屉，
+ * sheetState 控制 peek（露个头）/ half（半屏）/ full（全屏）三档。
+ *
+ * 地图交互：
+ *   - 商品标记按"屏幕坐标聚类"：相邻太近的标记合并成一个"N 件"气泡，
+ *     点击展开同组商品，避免同一交接点的商品互相压住；
+ *   - 拖动/缩放后出现"搜索此区域"按钮，用当前视野矩形过滤列表；
+ *   - "定位"按钮走 locateAmap（浏览器定位，详见 composables/amap.ts），
+ *     拿到位置后按直线距离排序商品。
+ *
+ * 竞态：generation 标记"地图实例的生命周期"（start 重开时 +1），
+ * locationSequence 标记"第几次点定位"，迟到的旧回调靠比对它们丢弃。
+ */
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+// useRoute：读当前路由信息（query 参数等）
+import { useRoute } from 'vue-router'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
-
-const key = import.meta.env.VITE_AMAP_KEY ?? ''
-const securityJsCode = import.meta.env.VITE_AMAP_SECURITY_CODE ?? ''
-const campus = [120.165741, 30.293231]
-// 示例坐标固定在校区附近，不随用户定位移动，避免把示例误认为真实附近商品。
-const items = [
-  { id: 1, title: '九成新台灯', price: 25, category: '生活', place: '图书馆附近', position: [120.1672, 30.2941], x: 57, y: 33, description: '宿舍桌面的小伙伴，支持冷暖光调节。' },
-  { id: 2, title: '考研英语词典', price: 12, category: '书籍', place: '教学楼附近', position: [120.1638, 30.2917], x: 30, y: 54, description: '少量铅笔笔记，希望交给下一个需要它的人。' },
-  { id: 3, title: '蓝牙键盘', price: 60, category: '数码', place: '东侧校门附近', position: [120.169, 30.2918], x: 73, y: 59, description: '轻巧便携，适合自习时搭配平板使用。' },
-]
-const mapEl = ref(null)
-const ready = ref(false)
-const query = ref('')
-const category = ref('全部')
-const selectedId = ref(null)
-const userPosition = ref(null)
-const locating = ref(false)
-const radius = ref('all')
-const notice = ref(key ? '正在加载高德地图……' : '未配置高德 Key，当前为校区示意图。')
-const locationNotice = ref('点击“我的位置”后，将请求设备定位权限。')
-let map, geolocation, userMarker, accuracyCircle, scriptEl, loadTimer, locationTimer, mapTimer
+import Select from 'primevue/select'
+import Message from 'primevue/message'
+import { Search, MapPin, LocateFixed, RefreshCw, ChevronUp, ChevronDown, ImageOff, ListFilter, X } from 'lucide-vue-next'
+import MarketDetail from '@/components/MarketDetail.vue'
+import { marketItems, categories, campus, browseState, distanceMeters, priceLabel } from '@/data/market'
+import { amapPlugins, mapStyle, locateAmap } from '@/composables/amap'
+const route = useRoute()
+// 只取闲置商品（种草不进地图）
+const items = marketItems.filter(item => item.kind === 'idle')
+const isDark = inject('isDark', ref(false))
+// mapEl=地图容器；listEl=商品列表滚动容器
+const mapEl = ref(null), listEl = ref(null)
+// 初始搜索词：从地图入口带着 item 来 → 置空；带着 q 来 → 用它；否则用市集页存下的
+const query = ref(route.query.item ? '' : typeof route.query.q === 'string' ? route.query.q : browseState.idleQuery)
+// 初始分类：同理（route.query.category 是 URL ?category=xxx 传来的）
+const category = ref(route.query.item ? '全部' : categories.includes(route.query.category) ? route.query.category : browseState.category)
+// URL 带了具体商品 id 就预选中它
+const selectedId = ref(typeof route.query.item === 'string' ? route.query.item : null)
+// detail=详情弹窗商品；ready=地图就绪；loading/error=加载状态；locationNotice=定位提示条
+const detail = ref(null), ready = ref(false), loading = ref(false), error = ref(''), locationNotice = ref('')
+// userPosition=我的坐标；locating=定位中；radius=距离筛选值
+const userPosition = ref(null), locating = ref(false), radius = ref('all')
+// areaDirty=视野变了提示"搜索此区域"；searchBounds=当前视野矩形；groupIds=聚合组内商品 id
+const areaDirty = ref(false), searchBounds = ref(null), groupIds = ref([])
+// 手机端底部抽屉：peek 露个头 / half 半屏 / full 全屏
+const sheetState = ref('half')
+const radiusOptions = [{ label: '不限距离', value: 'all' }, { label: '我附近 1 公里', value: '1000' }, { label: '我附近 3 公里', value: '3000' }]
+// SDK 实例们（非响应式，普通 let 即可）；markers=商品标记数组；userMarker=我的位置标记
+let sdk, map, markers = [], userMarker, locationAbort
+// 两把竞态号（见文件头注释）+ 底图超时计时器
+let generation = 0, locationSequence = 0, mapTimer
 let disposed = false
-let markers = []
-let locateSequence = 0
-
-function distance(position) {
-  if (!userPosition.value) return null
-  const radians = value => value * Math.PI / 180
-  const [lng, lat] = userPosition.value
-  const a = Math.sin(radians(position[1] - lat) / 2) ** 2 + Math.cos(radians(lat)) * Math.cos(radians(position[1])) * Math.sin(radians(position[0] - lng) / 2) ** 2
-  return 6371000 * 2 * Math.asin(Math.sqrt(Math.min(1, a)))
-}
-const visibleItems = computed(() => items.map(item => ({ ...item, distance: distance(item.position) }))
-  .filter(item => (category.value === '全部' || item.category === category.value)
-    && `${item.title}${item.place}`.includes(query.value.trim())
-    && (radius.value === 'all' || item.distance === null || item.distance <= Number(radius.value)))
+// 列表的完整过滤链：分类 → 关键词 → 距离（需先定位）→ 视野范围（需点过"搜索此区域"），
+// 最后有定位时按距离从近到远排。距离算的是直线，不是步行路线。
+const matchingItems = computed(() => items.map(item => ({ ...item, distance: userPosition.value ? distanceMeters(userPosition.value, item.position) : null }))
+  .filter(item => (category.value === '全部' || item.category === category.value) && item.title.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase()) && (radius.value === 'all' || item.distance === null || item.distance <= Number(radius.value)) && (!searchBounds.value || (item.position[0] >= searchBounds.value[0] && item.position[0] <= searchBounds.value[2] && item.position[1] >= searchBounds.value[1] && item.position[1] <= searchBounds.value[3])))
   .sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0)))
+// 顶部列表显示哪批商品：点开某个聚合气泡后只显示该组的，否则显示全部匹配项。
+const visibleItems = computed(() => groupIds.value.length ? matchingItems.value.filter(item => groupIds.value.includes(item.id)) : matchingItems.value)
+// 当前选中的商品对象（按 id 从可见列表找）
 const selected = computed(() => visibleItems.value.find(item => item.id === selectedId.value))
-function distanceLabel(value) {
-  return value === null ? '定位后显示距离' : `${value < 1000 ? Math.round(value) + ' m' : (value / 1000).toFixed(1) + ' km'} · 直线距离`
-}
-function selectItem(item) {
+// 距离文案：null=没定位过；米<1000 显示 m，否则显示 km（toFixed(1) 保留 1 位小数）
+function distanceLabel(value) { return value === null ? '公共交接点' : (value < 1000 ? Math.round(value) + ' m' : (value / 1000).toFixed(1) + ' km') + ' · 直线距离' }
+// 选中某个商品：地图平移过去 + 列表滚到对应行
+async function selectItem(item, pan = true) {
   selectedId.value = item.id
-  if (ready.value) map.setZoomAndCenter(17, item.position)
+  if (sheetState.value === 'peek') sheetState.value = 'half'   // 抽屉露头时抬到半屏
+  if (pan && map && ready.value) {
+    map.panTo(item.position)
+    // 手机底部列表会覆盖地图下部，把选中点留在面板上方。
+    if (window.matchMedia('(max-width: 760px)').matches) map.panBy(0, -(mapEl.value?.clientHeight ?? 0) * .18)
+  }
+  await nextTick()   // 等列表重新渲染
+  // querySelector 用属性选择器找 data-id 对应的行；scrollTop 把它滚进视野
+  const row = listEl.value?.querySelector('[data-id="' + item.id + '"]')
+  if (row && listEl.value) listEl.value.scrollTop = Math.max(0, row.offsetTop - listEl.value.offsetTop - 8)
 }
 function renderMarkers() {
   if (!map || !ready.value) return
-  map.remove(markers)
-  markers = visibleItems.value.map(item => {
-    const content = document.createElement('button')
-    content.type = 'button'
-    content.textContent = `¥${item.price} · ${item.title}`
-    content.setAttribute('aria-label', `查看${item.title}，${item.price}元`)
-    content.style.cssText = `border:1px solid #111;border-radius:20px;padding:8px 12px;white-space:nowrap;cursor:pointer;font:13px system-ui;background:${item.id === selectedId.value ? '#111' : '#fff'};color:${item.id === selectedId.value ? '#fff' : '#111'}`
-    content.addEventListener('click', () => selectItem(item))
-    return new window.AMap.Marker({ position: item.position, content, anchor: 'bottom-center', title: item.title })
-  })
-  map.add(markers)
-}
-watch(visibleItems, () => {
-  if (!visibleItems.value.some(item => item.id === selectedId.value)) selectedId.value = null
-  renderMarkers()
-})
-watch(selectedId, renderMarkers)
-function showCampus() {
-  if (ready.value) map.setZoomAndCenter(16, campus)
-}
-function loadAmap() {
-  if (window.AMap) return Promise.resolve()
-  return new Promise((resolve, reject) => {
-    if (securityJsCode) window._AMapSecurityConfig = { securityJsCode }
-    scriptEl = document.createElement('script')
-    scriptEl.src = `https://webapi.amap.com/maps?v=2.0&key=${encodeURIComponent(key)}&plugin=AMap.Geolocation,AMap.Scale,AMap.ToolBar`
-    loadTimer = window.setTimeout(() => reject(new Error('地图加载超时')), 15000)
-    scriptEl.onload = () => { clearTimeout(loadTimer); window.AMap ? resolve() : reject(new Error('地图不可用')) }
-    scriptEl.onerror = () => { clearTimeout(loadTimer); reject(new Error('地图加载失败')) }
-    document.head.appendChild(scriptEl)
-  })
-}
-function locate() {
-  if (!geolocation || locating.value) return
-  locating.value = true
-  locationNotice.value = '正在定位，请允许浏览器访问位置……'
-  const sequence = ++locateSequence
-  locationTimer = window.setTimeout(() => {
-    if (disposed || sequence !== locateSequence) return
-    ++locateSequence
-    locating.value = false
-    locationNotice.value = '定位超时，请检查设备定位服务后重试。'
-  }, 12000)
-  geolocation.getCurrentPosition((status, result) => {
-    if (disposed || sequence !== locateSequence) return
-    clearTimeout(locationTimer)
-    locating.value = false
-    if (status !== 'complete' || !result?.position) {
-      locationNotice.value = '无法获取位置，请检查浏览器权限、设备定位服务及 HTTPS 连接后重试。'
-      return
-    }
-    const position = [result.position.getLng(), result.position.getLat()]
-    userPosition.value = position
-    if (userMarker) map.remove(userMarker)
-    if (accuracyCircle) map.remove(accuracyCircle)
-    userMarker = new window.AMap.Marker({ position, title: '我的位置', zIndex: 200 })
-    map.add(userMarker)
-    if (Number.isFinite(result.accuracy) && result.accuracy > 0) {
-      accuracyCircle = new window.AMap.Circle({ center: position, radius: result.accuracy, strokeColor: '#666', strokeOpacity: 0.4, fillColor: '#888', fillOpacity: 0.1 })
-      map.add(accuracyCircle)
-    }
-    map.setZoomAndCenter(16, position)
-    locationNotice.value = `已定位${result.accuracy ? '，精度约 ' + Math.round(result.accuracy) + ' 米' : ''}。闲置为固定校区示例。`
-  })
-}
-onMounted(async () => {
-  if (!key) return
-  try {
-    await loadAmap()
-    if (disposed) return
-    await nextTick()
-    if (disposed) return
-    map = new window.AMap.Map(mapEl.value, { mapStyle: 'amap://styles/whitesmoke', center: campus, zoom: 16, zooms: [3, 20] })
-    mapTimer = window.setTimeout(() => {
-      if (!disposed && !ready.value) notice.value = '地图尚未加载完成，请检查网络与高德配置；当前为校区示意图。'
-    }, 15000)
-    map.on('complete', () => {
-      if (disposed) return
-      clearTimeout(mapTimer)
-      ready.value = true
-      notice.value = '高德地图 · 闲置为示例数据，尚未接入商品接口'
-      renderMarkers()
-    })
-    window.AMap.plugin(['AMap.Geolocation', 'AMap.Scale', 'AMap.ToolBar'], () => {
-      if (disposed) return
-      map.addControl(new window.AMap.Scale({ position: 'LB' }))
-      map.addControl(new window.AMap.ToolBar({ position: 'RB', offset: [16, 80] }))
-      geolocation = new window.AMap.Geolocation({ enableHighAccuracy: true, timeout: 10000, convert: true, showButton: false, showMarker: false, showCircle: false, panToLocation: false, zoomToAccuracy: false })
-      locationAvailable.value = true
-    })
-  } catch {
-    if (!disposed) notice.value = '高德地图加载失败，请检查网络、Key 和安全配置；当前为校区示意图。'
+  map.remove(markers); markers = []   // 清掉旧标记重画
+  // 相邻屏幕坐标合并为一组；同一交接点多件商品不会互相覆盖。
+  // 注意聚的是"屏幕像素"距离（lngLatToContainer），所以缩放级别变化要重算（zoomend 里调了这里）。
+  const groups = []
+  for (const item of matchingItems.value) {
+    // 经纬度 → 容器像素坐标
+    const pixel = map.lngLatToContainer(item.position)
+    const x = pixel.getX(), y = pixel.getY()
+    // 找 60×40 像素内已有的组；找到就并入，否则新开一组
+    const group = groups.find(g => Math.abs(g.x - x) < 60 && Math.abs(g.y - y) < 40)
+    if (group) group.items.push(item)
+    else groups.push({ x, y, items: [item] })
   }
-})
-const locationAvailable = ref(false)
-onBeforeUnmount(() => {
-  disposed = true
-  ++locateSequence
-  clearTimeout(loadTimer)
-  clearTimeout(locationTimer)
-  clearTimeout(mapTimer)
-  if (scriptEl) { scriptEl.onload = null; scriptEl.onerror = null }
-  map?.destroy()
-  map = null
-})
+  for (const group of groups) {
+    const first = group.items[0]
+    // 自定义标记内容：直接造一个 <button> 元素给 Marker（样式见全局 .market-price-pin）
+    const content = document.createElement('button')
+    content.type = 'button'; content.className = 'market-price-pin'
+    content.classList.toggle('is-selected', group.items.some(item => item.id === selectedId.value))
+    // 多件 → 显示"N 件"；单件 → 显示价格
+    content.textContent = group.items.length > 1 ? group.items.length + ' 件' : priceLabel(first.price)
+    content.setAttribute('aria-label', group.items.length > 1 ? '查看这个地点附近的 ' + group.items.length + ' 件商品' : '查看' + first.title)
+    content.addEventListener('click', () => {
+      if (group.items.length > 1) { groupIds.value = group.items.map(item => item.id); sheetState.value = 'full'; selectedId.value = null }
+      else { groupIds.value = []; selectItem(first, false) }
+    })
+    // zIndex：选中的标记叠在最上面
+    markers.push(new sdk.Marker({ position: first.position, content, anchor: 'bottom-center', zIndex: group.items.some(item => item.id === selectedId.value) ? 150 : 100 }))
+  }
+  map.add(markers)   // 批量上标记
+}
+// 记录当前视野的经纬度矩形，交给 matchingItems 的过滤链。
+function searchArea() {
+  if (!map) return
+  // getBounds：视野的西南角/东北角 → [西经, 南纬, 东经, 北纬]
+  const bounds = map.getBounds(), sw = bounds.getSouthWest(), ne = bounds.getNorthEast()
+  searchBounds.value = [sw.getLng(), sw.getLat(), ne.getLng(), ne.getLat()]; groupIds.value = []; areaDirty.value = false
+}
+// 重置全部筛选并回校区
+function resetFilters() { query.value = ''; category.value = '全部'; radius.value = 'all'; searchBounds.value = null; groupIds.value = []; areaDirty.value = false; if (ready.value) map.setZoomAndCenter(16, campus) }
+function backToCampus() { searchBounds.value = null; groupIds.value = []; areaDirty.value = false; if (ready.value) map.setZoomAndCenter(16, campus) }
+// 抽屉三档循环切换：peek → half → full → peek
+function toggleSheet() { sheetState.value = sheetState.value === 'peek' ? 'half' : sheetState.value === 'half' ? 'full' : 'peek' }
+// 离开页面 / 重开地图时的总清理：作废回调、中止定位、销毁地图实例。
+function cleanup() { ++generation; ++locationSequence; locationAbort?.abort(); locationAbort = null; clearTimeout(mapTimer); locating.value = false; map?.destroy(); map = null; markers = []; userMarker = null }
+// 初始化地图。底图加载完成（complete 事件）前 loading 一直开着，15 秒还没好
+// 就降级：不再挡着页面，列表照常能看。
+async function start() {
+  cleanup(); const token = generation; loading.value = true; ready.value = false; error.value = ''
+  await nextTick()
+  try {
+    sdk = await amapPlugins(['AMap.Geolocation', 'AMap.Scale', 'AMap.ToolBar'])
+    if (disposed || token !== generation || !mapEl.value) return
+    // 如果是带 item id 进来的，初始视野直接对准它
+    const initial = items.find(item => item.id === selectedId.value)
+    map = new sdk.Map(mapEl.value, { center: initial?.position ?? campus, zoom: 16, zooms: [3, 20], mapStyle: mapStyle(isDark.value), resizeEnable: true, animateEnable: !window.matchMedia('(prefers-reduced-motion: reduce)').matches })
+    map.addControl(new sdk.Scale({ position: 'LB' }))            // 左下角比例尺
+    map.addControl(new sdk.ToolBar({ position: 'RT', offset: [16, 66] }))   // 右上角缩放工具条
+    // complete：底图瓦片全部就绪 → 解除 loading、画标记、滚动到初始商品
+    map.on('complete', () => { if (token !== generation || disposed || ready.value) return; clearTimeout(mapTimer); loading.value = false; ready.value = true; error.value = ''; renderMarkers(); if (initial) selectItem(initial) })
+    // 缩放结束：像素聚类要重算 + 显示"搜索此区域"提示
+    map.on('zoomend', () => { if (ready.value) { renderMarkers(); areaDirty.value = true } })
+    // 拖动结束：视野变了
+    map.on('dragend', () => { if (ready.value) areaDirty.value = true })
+    map.on('resize', renderMarkers)
+    mapTimer = setTimeout(() => { if (token === generation && !ready.value) { loading.value = false; error.value = '底图加载超时，仍可浏览左侧商品列表。' } }, 15000)
+  } catch (cause) { if (!disposed && token === generation) { loading.value = false; error.value = cause instanceof Error ? cause.message : '地图加载失败。' } }
+}
+// 定位按钮：拿到坐标后放一个"我的位置"标记并平移过去；
+// locationSequence 保证用户连点时只有最后一次的结果生效。
+async function locate() {
+  if (!sdk || !map || locating.value) return
+  const sequence = ++locationSequence, controller = new AbortController()
+  locationAbort?.abort(); locationAbort = controller; locating.value = true
+  try {
+    const result = await locateAmap(sdk, controller.signal, message => { if (!disposed && sequence === locationSequence) locationNotice.value = message })
+    if (disposed || sequence !== locationSequence) return
+    userPosition.value = result.position
+    // 换"我的位置"标记：先摘旧再立新；zIndex 200 压过商品标记
+    userMarker?.setMap(null); userMarker = new sdk.Marker({ position: userPosition.value, title: '我的位置', zIndex: 200 }); map.add(userMarker)
+    searchBounds.value = null; groupIds.value = []; map.panTo(userPosition.value)
+    locationNotice.value = (result.accuracy ? `已取得位置，精度约 ${Math.round(result.accuracy)} 米。` : '已取得位置，请核对地图标记。') + '距离按直线计算，商品仍为固定校区示例。'
+  } catch (cause) {
+    if (!disposed && sequence === locationSequence) locationNotice.value = cause instanceof Error ? cause.message : '定位失败，你仍可按校区查看商品。'
+  } finally { if (!disposed && sequence === locationSequence) { locating.value = false; locationAbort = null } }
+}
+// 搜索词/分类变化：同步回全局浏览状态（回市集页还记得）+ 清聚合组
+watch([query, category], () => { browseState.idleQuery = query.value; browseState.category = category.value; groupIds.value = [] })
+// 匹配结果变了：若选中的被过滤掉了就取消选中，并重画标记
+watch(matchingItems, () => { if (!matchingItems.value.some(item => item.id === selectedId.value)) selectedId.value = null; renderMarkers() })
+watch(selectedId, renderMarkers)   // 选中变化也要重画（换选中样式/zIndex）
+watch(isDark, dark => map?.setMapStyle(mapStyle(dark)))
+onMounted(start)
+onBeforeUnmount(() => { disposed = true; cleanup() })
 </script>
-
 <template>
-  <section class="map-page">
-    <aside class="map-panel">
-      <p class="eyebrow">校园漫游 / NEARBY</p>
-      <h1>好东西，在附近。</h1>
-      <p class="intro">走几步，遇见下一件喜欢的闲置。</p>
-      <label for="map-search">搜索闲置或地点</label>
-      <InputText id="map-search" v-model="query" placeholder="台灯、词典、图书馆……" fluid />
-      <!-- aria-label 给无可见标题的控件组提供语义名称；aria-pressed 表示当前筛选是否选中。 -->
-      <div class="filters" aria-label="闲置分类">
-        <button v-for="name in ['全部', '生活', '书籍', '数码']" :key="name" :aria-pressed="category === name" @click="category = name">{{ name }}</button>
+  <!-- :style 挂 CSS 变量 --sheet-offset：抽屉三档对应不同的偏移量，
+       下方的版权/比例尺位置和列表抽屉都引用它 -->
+  <section class="map-page" :style="{ '--sheet-offset': sheetState === 'peek' ? '78px' : sheetState === 'half' ? 'max(45%, 230px)' : 'calc(100% - 70px)' }">
+    <!-- 商品列表面板（手机端变底部抽屉）：动态类 sheet-peek/half/full 控制位置 -->
+    <aside class="map-panel" :class="'sheet-' + sheetState">
+      <!-- 抽屉把手按钮：aria-expanded 告诉读屏当前展开状态 -->
+      <Button unstyled class="sheet-toggle" :aria-expanded="sheetState !== 'peek'" aria-controls="map-panel-content" :aria-label="sheetState === 'full' ? '收起商品列表' : '展开商品列表'" @click="toggleSheet"><span class="sheet-grip"></span><span>{{ visibleItems.length }} 件商品</span><component :is="sheetState === 'full' ? ChevronDown : ChevronUp" :size="18" aria-hidden="true" /></Button>
+      <div id="map-panel-content" class="panel-content">
+        <div class="panel-heading"><div><h1>附近商品</h1><p>朝晖校区 · 示例交接地点</p></div><MapPin :size="20" aria-hidden="true" /></div>
+        <label class="map-search"><Search :size="17" aria-hidden="true" /><InputText v-model="query" aria-label="搜索附近商品" placeholder="搜索想找的商品" fluid /></label>
+        <!-- 分类下拉 + 距离下拉（没定位过时禁用） -->
+        <div class="map-filters"><Select v-model="category" :options="categories" aria-label="商品分类" size="small" /><Select v-model="radius" :options="radiusOptions" optionLabel="label" optionValue="value" aria-label="距离范围，需要先定位" size="small" :disabled="!userPosition" /></div>
+        <div class="list-heading"><span>{{ visibleItems.length }} 件{{ groupIds.length ? '同组' : '' }}商品</span><Button v-if="groupIds.length || searchBounds" label="清除范围" text size="small" severity="secondary" @click="groupIds = []; searchBounds = null" /><small v-else>示例数据</small></div>
+        <!-- 商品列表：data-id 是自定义属性（data-* 合法），脚本用它定位行 -->
+        <div ref="listEl" class="item-list">
+          <article v-for="item in visibleItems" :key="item.id" :data-id="item.id" class="result-item" :class="{ active: selectedId === item.id }"><Button unstyled class="result-button" :aria-pressed="selectedId === item.id" @click="selectItem(item)"><img v-if="item.image" :src="item.image" :alt="item.title + '，示例素材'" :style="{ objectPosition: item.imagePosition }"><span v-else class="result-missing"><ImageOff :size="22" aria-hidden="true" /></span><span class="result-copy"><strong>{{ item.title }}</strong><b>{{ priceLabel(item.price) }}</b><small>{{ item.place }}</small><small>{{ distanceLabel(item.distance) }}</small></span></Button><Transition name="result-reveal"><div v-if="selectedId === item.id" class="result-actions"><Button label="查看商品详情" size="small" severity="secondary" @click="detail = item" /><Button text severity="secondary" size="small" aria-label="取消选中" @click="selectedId = null"><X :size="15" aria-hidden="true" /></Button></div></Transition></article>
+          <div v-if="!visibleItems.length" class="map-list-empty" role="status"><ListFilter :size="26" aria-hidden="true" /><p>这个范围没有匹配商品</p><Button label="重置筛选" severity="secondary" size="small" @click="resetFilters" /></div>
+        </div>
+        <p class="data-note">高德提供底图与定位。商品为本地示例，不代表真实在售。</p>
       </div>
-      <label for="map-radius">距离范围</label>
-      <select id="map-radius" v-model="radius" :disabled="!userPosition">
-        <option value="all">全部示例地点</option><option value="1000">我附近 1 公里</option><option value="3000">我附近 3 公里</option>
-      </select>
-      <div class="list-heading"><strong>{{ visibleItems.length }} 件闲置</strong><span>示例数据</span></div>
-      <div class="item-list">
-        <button v-for="item in visibleItems" :key="item.id" class="item" :class="{ active: selectedId === item.id }" @click="selectItem(item)">
-          <span class="item-category">{{ item.category }}</span><span class="item-copy"><strong>{{ item.title }}</strong><small>{{ item.place }}</small><small>{{ distanceLabel(item.distance) }}</small></span><b>¥{{ item.price }}</b>
-        </button>
-        <p v-if="!visibleItems.length" class="empty">这个范围内没有匹配的示例闲置，试试调整距离或关键词。</p>
-      </div>
-      <p class="data-note">闲置坐标为朝晖校区示例；高德提供地图与定位，不提供市集商品数据。</p>
     </aside>
-    <div class="map-stage">
-      <div ref="mapEl" class="amap-box" aria-label="附近闲置地图"></div>
-      <div v-if="!ready" class="mock-stage">
-        <svg viewBox="0 0 900 640" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><g stroke="#dfdfdb" stroke-width="18" fill="none"><path d="M-20 180 Q400 260 920 210 M-20 430 Q520 380 920 440 M180 -20 Q140 460 200 660 M640 -20 Q700 420 660 660" /></g><path d="M-20 270 Q480 330 920 270" stroke="#d4deda" stroke-width="28" fill="none" /></svg>
-        <span class="campus-label">浙工大 · 朝晖校区</span>
-        <button v-for="item in visibleItems" :key="item.id" class="mock-pin" :class="{ active: selectedId === item.id }" :style="{ left: item.x + '%', top: item.y + '%' }" @click="selectItem(item)">¥{{ item.price }} · {{ item.title }}</button>
-      </div>
-      <div class="map-actions"><Button label="回到校区" severity="secondary" rounded @click="showCampus" /><Button :label="locating ? '定位中…' : '我的位置'" :disabled="!ready || !locationAvailable || locating" severity="contrast" rounded @click="locate" /></div>
-      <div class="map-status" role="status"><p>{{ notice }}</p><p>{{ locationNotice }}</p></div>
-      <article v-if="selected" class="detail-card"><button class="close" aria-label="关闭闲置详情" @click="selectedId = null">×</button><small>示例闲置 / {{ selected.category }}</small><h2>{{ selected.title }} <span>¥{{ selected.price }}</span></h2><p>{{ selected.description }}</p><small>{{ selected.place }} · {{ distanceLabel(selected.distance) }}</small></article>
+    <!-- 地图区 -->
+    <div class="map-stage"><div ref="mapEl" class="amap-box" aria-label="附近商品的高德地图"></div>
+      <!-- 加载中/失败覆盖层 -->
+      <div v-if="loading || error" class="map-state" role="status"><MapPin :size="32" aria-hidden="true" /><h2>{{ loading ? '正在加载地图' : '地图暂不可用' }}</h2><p>{{ loading ? '商品列表可以先浏览。' : error }}</p><Button v-if="error" severity="secondary" @click="start"><RefreshCw :size="16" aria-hidden="true" />重试地图</Button></div>
+      <!-- 左下角快捷按钮组：回校区 / 定位 -->
+      <div v-if="ready" class="map-actions"><Button severity="secondary" size="small" aria-label="回到朝晖校区" @click="backToCampus"><MapPin :size="16" aria-hidden="true" /><span>校区</span></Button><Button severity="secondary" size="small" :loading="locating" aria-label="定位我的位置" @click="locate"><LocateFixed :size="16" aria-hidden="true" /><span>定位</span></Button></div>
+      <!-- 拖动/缩放后才出现的"搜索此区域"按钮（Transition 淡入淡出） -->
+      <Transition name="map-control"><Button v-if="areaDirty && ready" class="area-search" severity="secondary" @click="searchArea"><Search :size="15" aria-hidden="true" />搜索此区域</Button></Transition>
+      <!-- closable：带关闭按钮；@close 关掉提示条 -->
+      <Message v-if="locationNotice" class="location-message" severity="secondary" size="small" closable @close="locationNotice = ''">{{ locationNotice }}</Message>
+      <span v-if="ready" class="map-sample-label">商品为示例 · 不包含种草地点</span>
     </div>
+    <!-- 详情弹窗：showMap=false——已经在地图页了，不需要"在地图查看"按钮 -->
+    <MarketDetail :item="detail" :showMap="false" @close="detail = null" />
   </section>
 </template>
+<style scoped>
+.map-page{display:flex;flex:1;min-height:0;min-width:0;position:relative;overflow:hidden;background:var(--app-bg);color:var(--app-text);font:14px/1.5 system-ui,sans-serif}.map-panel{width:340px;flex:none;display:flex;flex-direction:column;min-height:0;background:var(--app-surface);border-right:1px solid var(--app-border);z-index:2}.panel-content{display:flex;flex-direction:column;flex:1;min-height:0;padding:24px 18px 12px}.panel-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}.panel-heading h1{font-size:21px;font-weight:650;margin:0}.panel-heading p{font-size:11px;color:var(--app-muted);margin:5px 0 0}.panel-heading>svg{color:var(--app-muted)}.map-search{position:relative}.map-search>svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--app-muted);z-index:1}.map-search :deep(input){padding-left:36px}.map-filters{display:grid;grid-template-columns:1fr 1.3fr;gap:8px;margin:12px 0 6px}.map-filters :deep(.p-select){min-width:0}.list-heading{display:flex;align-items:center;justify-content:space-between;min-height:46px;font-size:12px}.list-heading small{font-size:10px;color:var(--app-muted)}.item-list{overflow:auto;min-height:0;flex:1;scrollbar-gutter:stable}.result-item{border-bottom:1px solid var(--app-border);border-radius:8px;transition:background .18s}.result-item.active{background:var(--app-hover)}.result-button{display:flex;gap:12px;width:100%;text-align:left;padding:14px 8px;background:none;border:0;color:var(--app-text);font:inherit;cursor:pointer}.result-button:focus-visible{outline:2px solid var(--app-text);outline-offset:-2px;border-radius:8px}.result-button>img,.result-missing{width:72px;height:84px;flex:none;border:1px solid var(--app-border);border-radius:8px;object-fit:cover;background:var(--app-hover)}.result-missing{display:grid;place-items:center;color:var(--app-muted)}.result-copy{min-width:0}.result-copy strong{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:13px;line-height:1.5;font-weight:500}.result-copy b{display:block;font-size:18px;font-variant-numeric:tabular-nums;margin:5px 0}.result-copy small{display:block;font-size:10px;color:var(--app-muted);margin-top:2px}.result-actions{display:flex;justify-content:space-between;gap:8px;padding:0 8px 12px}.data-note{font-size:10px;line-height:1.7;color:var(--app-muted);margin:10px 0 0}.map-list-empty{padding:30px 8px;display:flex;flex-direction:column;align-items:center;color:var(--app-muted);font-size:12px}.map-stage{position:relative;flex:1;min-width:0;overflow:hidden;background:var(--app-map-bg)}.amap-box{position:absolute;inset:0}.map-state{position:absolute;inset:0;background:var(--app-surface);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px;color:var(--app-muted)}.map-state h2{font-size:18px;margin:14px 0 6px;color:var(--app-text);font-weight:500}.map-state p{font-size:12px;max-width:320px;margin:0 0 20px}.map-actions{position:absolute;top:16px;right:16px;display:flex;gap:8px}.area-search{position:absolute;top:16px;left:16px}.location-message{position:absolute;top:68px;left:16px;right:70px;max-width:440px;z-index:1}.map-sample-label{position:absolute;right:12px;bottom:10px;padding:4px 7px;background:var(--app-field);color:var(--app-muted);font-size:10px;border-radius:4px;border:1px solid var(--app-border);pointer-events:none}.sheet-toggle{display:none}.map-control-enter-active,.map-control-leave-active,.result-reveal-enter-active,.result-reveal-leave-active{transition:opacity .16s ease,transform .16s ease}.map-control-enter-from,.map-control-leave-to,.result-reveal-enter-from,.result-reveal-leave-to{opacity:0;transform:translateY(4px)}@media(max-width:1000px){.map-panel{width:300px}.panel-content{padding:20px 14px 12px}.result-button>img,.result-missing{width:62px;height:76px}}@media(max-width:760px){.map-stage{position:absolute;inset:0}.map-panel{position:absolute;bottom:0;left:0;right:0;width:100%;border:1px solid var(--app-border);border-bottom:0;border-radius:18px 18px 0 0;transition:height .22s ease;box-shadow:0 -4px 20px var(--app-shadow);overflow:hidden}.map-panel.sheet-peek{height:78px}.map-panel.sheet-half{height:45%;min-height:230px}.map-panel.sheet-full{height:calc(100% - 70px)}.sheet-toggle{display:flex;align-items:center;justify-content:space-between;position:relative;flex:none;width:100%;height:50px;padding:18px 18px 6px;background:none;color:var(--app-text);border:0;font:inherit;font-size:12px;cursor:pointer;touch-action:pan-x}.sheet-grip{position:absolute;top:7px;left:calc(50% - 18px);width:36px;height:3px;background:var(--app-border);border-radius:2px}.sheet-peek .panel-content{visibility:hidden}.panel-content{padding:6px 16px 12px}.panel-heading{display:none}.map-filters{margin-top:8px}.map-actions{top:12px;right:12px}.area-search{top:62px;left:12px;font-size:12px}.location-message{top:108px;left:12px;right:12px;font-size:11px}.map-state{justify-content:flex-start;padding-top:50px}.map-sample-label{top:15px;left:12px;right:auto;bottom:auto;font-size:9px;max-width:42%}.data-note{display:none}.result-button>img,.result-missing{width:64px;height:72px}.map-stage :deep(.amap-logo){bottom:82px!important}.map-stage :deep(.amap-copyright){bottom:78px!important}.map-stage :deep(.amap-scalecontrol){bottom:110px!important}}@media(prefers-reduced-motion:reduce){.map-panel,.result-item,.map-control-enter-active,.map-control-leave-active,.result-reveal-enter-active,.result-reveal-leave-active{transition:none}.map-control-enter-from,.map-control-leave-to,.result-reveal-enter-from,.result-reveal-leave-to{transform:none}}
+</style>
 
 <style scoped>
-.map-page { display: flex; flex: 1; min-height: 0; min-width: 0; color: var(--app-text, #171717); background: var(--app-bg, #f5f1e8); font-family: 'Round', system-ui, sans-serif; }
-.map-panel { width: 320px; flex-shrink: 0; overflow: auto; padding: 28px 22px; border-right: 1px solid var(--app-border, #ddd); background: var(--app-surface, #fbf8f1); }
-.eyebrow { font-size: 10px; letter-spacing: 2px; color: #777; margin: 0 0 14px; }
-h1 { font-family: 'Ding', system-ui, sans-serif; font-size: 30px; font-weight: normal; margin: 0; }
-.intro { font-size: 12px; color: #777; line-height: 1.8; margin: 12px 0 24px; }
-label { display: block; font-size: 11px; color: #666; margin: 12px 0 8px; }
-select { width: 100%; border: 1px solid #ddd; border-radius: 10px; background: white; padding: 9px; font: inherit; font-size: 12px; }
-.filters { display: flex; gap: 7px; margin: 14px 0; }
-.filters button { border: 1px solid #ddd; border-radius: 20px; padding: 6px 12px; background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
-.filters button[aria-pressed=true] { background: #171717; color: white; border-color: #171717; }
-.list-heading { display: flex; justify-content: space-between; font-size: 12px; border-top: 1px solid #ddd; margin-top: 24px; padding: 20px 0 10px; }
-.list-heading span, .data-note { color: #888; font-size: 11px; }
-.item { display: flex; gap: 10px; align-items: flex-start; width: 100%; padding: 16px 8px; text-align: left; border: 0; border-bottom: 1px solid #e5e5e5; background: transparent; cursor: pointer; font: inherit; }
-.item.active { background: #eee; border-radius: 10px; }
-.item-category { font-size: 10px; border: 1px solid #ddd; padding: 5px; writing-mode: vertical-rl; letter-spacing: 3px; }
-.item-copy { flex: 1; }.item-copy strong { font-size: 13px; font-weight: normal; }.item-copy small { display: block; margin-top: 7px; font-size: 10px; color: #777; }.item b { font-size: 16px; }
-.data-note, .empty { line-height: 1.8; margin-top: 20px; }.empty { font-size: 12px; color: #777; }
-.map-stage { flex: 1; min-width: 0; position: relative; overflow: hidden; }.amap-box, .mock-stage { position: absolute; inset: 0; }.mock-stage { background: #eeefea; }.mock-stage svg { width: 100%; height: 100%; }.campus-label { position: absolute; top: 45%; left: 35%; color: #92968e; font-size: 12px; }
-.mock-pin { position: absolute; transform: translate(-50%, -100%); border: 1px solid #111; border-radius: 20px; padding: 8px 12px; background: white; white-space: nowrap; font-size: 12px; cursor: pointer; }.mock-pin.active { background: #111; color: white; }
-.map-actions { position: absolute; top: 18px; right: 18px; display: flex; gap: 8px; }.map-status { position: absolute; left: 16px; top: 72px; right: 16px; pointer-events: none; }.map-status p { width: fit-content; max-width: 100%; padding: 5px 10px; margin: 4px 0; background: #fffffff0; border-radius: 6px; font-size: 10px; color: #666; }
-.detail-card { position: absolute; left: 22px; right: 65px; bottom: 55px; padding: 20px; background: white; border: 1px solid #ddd; border-radius: 16px; max-width: 370px; }.detail-card small { font-size: 11px; color: #777; }.detail-card h2 { font-size: 19px; margin: 10px 0; }.detail-card h2 span { margin-left: 14px; }.detail-card p { font-size: 12px; line-height: 1.8; }.close { position: absolute; right: 12px; top: 8px; background: none; border: 0; font-size: 23px; cursor: pointer; }
-button:focus-visible, select:focus-visible { outline: 2px solid #999; outline-offset: 3px; }
-@media(max-width: 800px) { .map-page { flex-direction: column-reverse; overflow: auto; }.map-stage { flex: 0 0 55vh; min-height: 340px; }.map-panel { width: 100%; overflow: visible; padding: 22px; border-right: 0; }.item-list { display: flex; flex-wrap: wrap; }.item { flex: 1 1 240px; }.map-actions { top: 12px; right: 12px; } }
+/* 地图版权与比例尺跟随结果面板上沿，不能被底部列表遮住。 */
+@media(max-width:760px){
+  .map-stage :deep(.amap-logo){bottom:calc(var(--sheet-offset) + 6px)!important}
+  .map-stage :deep(.amap-copyright){bottom:calc(var(--sheet-offset) + 2px)!important}
+  .map-stage :deep(.amap-scalecontrol){bottom:calc(var(--sheet-offset) + 32px)!important}
+}
 </style>

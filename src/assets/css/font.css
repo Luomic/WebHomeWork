@@ -1,13 +1,14 @@
+/* @font-face：把本地字体文件注册成网页可用字体。声明后 CSS 里就能用 font-family: 'Ding' 引用 */
 @font-face {
-  font-family: 'Ding';
-  src: url('../fonts/ding.woff2') format('woff2');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
+  font-family: 'Ding';                       /* 注册的字体名字，模板样式里按这个名字引用（标题用） */
+  src: url('../fonts/ding.woff2') format('woff2');  /* 字体文件路径 + 格式说明（woff2 体积最小、现代浏览器全支持） */
+  font-weight: normal;                       /* 这个文件对应 normal（400）字重，浏览器不会拿它去加粗显示 */
+  font-style: normal;                        /* 对应正常体（非斜体） */
+  font-display: swap;                        /* 加载策略：字体没下完先用系统字体顶着，下完再换（避免文字空白） */
 }
 
 @font-face {
-  font-family: 'Round';
+  font-family: 'Round';                      /* 正文字体：圆体 */
   src: url('../fonts/round.woff2') format('woff2');
   font-weight: normal;
   font-style: normal;
