@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /*
- * 地点选择弹窗：发布帖子时选交易/推荐地点用。
+ * 地点选择弹窗：发布商品时选择交易地点。
  *
  * 三种选点方式，结果统一收进同一个 PlaceValue：
  *   1. 搜索地点（PlaceSearch，限杭州市）→ 点结果列表
@@ -24,10 +24,10 @@ import Message from 'primevue/message'
 import { Search, MapPin, LocateFixed, RefreshCw } from 'lucide-vue-next'
 // 高德地图相关工具：插件加载 / 地图样式 / 错误文案 / 浏览器定位
 import { amapPlugins, mapStyle, amapError, locateAmap } from '@/composables/amap'
-// campus：校区中心坐标（地图初始中心）；PlaceValue：地点数据结构；PostKind：帖子类型
-import { campus, type PlaceValue, type PostKind } from '@/data/market'
-// visible：弹窗开关；value：父级当前已选地点；kind：帖子类型（决定文案）
-const props = defineProps<{ visible: boolean; value: PlaceValue | null; kind: PostKind }>()
+// campus：校区中心坐标（地图初始中心）；PlaceValue：地点数据结构
+import { campus, type PlaceValue } from '@/data/market'
+// visible：弹窗开关；value：父级当前已选地点
+const props = defineProps<{ visible: boolean; value: PlaceValue | null }>()
 // 'update:visible' 是 v-model:visible 的另一半——emit 它父级就更新
 const emit = defineEmits<{ 'update:visible': [value: boolean]; select: [place: PlaceValue] }>()
 // 桥接：读父级的 visible，写时向父级发 update:visible
@@ -189,10 +189,10 @@ onBeforeUnmount(cleanup)
 </script>
 <template>
   <!-- @show：PrimeVue Dialog 的弹窗打开事件——每次打开都重新初始化地图 -->
-  <Dialog v-model:visible="shown" modal :draggable="false" class="place-picker-dialog" :header="kind === 'idle' ? '选择交易地点' : '选择推荐地点'" :style="{ width: '52rem', maxWidth: 'calc(100vw - 2rem)' }" @show="start">
+  <Dialog v-model:visible="shown" modal :draggable="false" class="place-picker-dialog" :header="'选择交易地点'" :style="{ width: '52rem', maxWidth: 'calc(100vw - 2rem)' }" @show="start">
     <div class="place-picker">
-      <!-- 顶部提示文案，按帖子类型切换 -->
-      <p class="picker-hint">{{ kind === 'idle' ? '选择公共交接点，不默认公开当前位置。' : '选中你想推荐的好地方，并核对地图位置。' }}当前搜索范围：杭州。</p>
+      <!-- 顶部提示文案 -->
+      <p class="picker-hint">选择公共交接点，不默认公开当前位置。当前搜索范围：杭州。</p>
       <!-- 搜索表单：回车或点按钮都触发 submit → @submit.prevent 拦下刷新改调 search()；
            :loading：按钮转圈；:disabled：三种情况禁用 -->
       <form class="place-search" @submit.prevent="search"><InputText v-model="query" aria-label="搜索地点" placeholder="搜索图书馆、店名或具体地址" :disabled="loading || !!error" /><Button type="submit" :loading="searching" :disabled="!query.trim() || loading || !!error" aria-label="搜索地点"><Search :size="17" aria-hidden="true" /><span>搜索</span></Button></form>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 商品/种草详情弹窗。visible 是个"桥接"：父级传 item 进来（有值=打开），
+// 商品详情弹窗。visible 是个"桥接"：父级传 item 进来（有值=打开），
 // 关闭时组件反向 emit('close') 让父级把 item 置空，两边状态保持一致。
 import { computed } from 'vue'
 import Dialog from 'primevue/dialog'
@@ -19,23 +19,23 @@ const visible = computed({
 })
 </script>
 <template>
-  <!-- item?.kind：?. 可选链——item 为 null 时不取 kind，整句返回 undefined 而不是报错 -->
-  <Dialog v-model:visible="visible" modal :draggable="false" class="market-detail-dialog" :header="item?.kind === 'recommend' ? '种草详情' : '商品详情'" :style="{ width: '42rem', maxWidth: 'calc(100vw - 2rem)' }">
+
+  <Dialog v-model:visible="visible" modal :draggable="false" class="market-detail-dialog" :header="'商品详情'" :style="{ width: '42rem', maxWidth: 'calc(100vw - 2rem)' }">
     <!-- v-if="item"：没数据时内部什么都不渲染 -->
     <article v-if="item" class="market-detail">
       <!-- 详情大图；object-fit 用 contain（完整显示不裁剪），背景垫色防留白突兀 -->
       <img v-if="item.image" class="detail-image" :src="item.image" :alt="item.title + '，项目示例素材'">
       <!-- 无图占位 -->
       <div v-else class="detail-missing"><ImageOff :size="30" aria-hidden="true" /><span>暂无实拍图片</span></div>
-      <!-- 标题行：闲置品右侧跟价格 -->
-      <div class="detail-heading"><h2>{{ item.title }}</h2><strong v-if="item.kind === 'idle'">{{ priceLabel(item.price) }}</strong></div>
-      <p class="detail-author">{{ item.author }} · {{ item.kind === 'idle' ? item.category : '种草' }}</p>
+      <!-- 标题行：商品右侧跟价格 -->
+      <div class="detail-heading"><h2>{{ item.title }}</h2><strong v-if="true">{{ priceLabel(item.price) }}</strong></div>
+      <p class="detail-author">{{ item.author }} · {{ item.category }}</p>
       <p class="detail-description">{{ item.description }}</p>
       <!-- 地点信息块：图钉图标 + 小标签 + 地名 -->
-      <div class="detail-location"><MapPin :size="18" aria-hidden="true" /><div><small>{{ item.kind === 'idle' ? '交接地点' : '推荐地点' }}</small><p>{{ item.place }}</p></div></div>
-      <Message severity="secondary" :closable="false" size="small">示例内容，尚未接入商品或种草接口，不代表真实发布。</Message>
-      <!-- 只在"闲置商品 + 允许显示地图"时出现；点击向父级抛 map 事件 -->
-      <Button v-if="showMap && item.kind === 'idle'" class="ink-button" @click="emit('map', item)"><MapPin :size="16" aria-hidden="true" />在地图查看</Button>
+      <div class="detail-location"><MapPin :size="18" aria-hidden="true" /><div><small>交接地点</small><p>{{ item.place }}</p></div></div>
+      <Message severity="secondary" :closable="false" size="small">示例内容，尚未接入商品接口，不代表真实发布。</Message>
+      <!-- 点击向父级抛 map 事件 -->
+      <Button v-if="showMap && true" class="ink-button" @click="emit('map', item)"><MapPin :size="16" aria-hidden="true" />在地图查看</Button>
     </article>
   </Dialog>
 </template>
@@ -58,4 +58,3 @@ const visible = computed({
 .detail-location p{margin:2px 0 0}
 .detail-location small{color:var(--app-muted)}
 </style>
-

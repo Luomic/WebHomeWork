@@ -26,6 +26,7 @@ const router = createRouter({
     {
       path: '/home',          // /home 是外壳路由，自己不直接显示内容
       name: 'home',
+      meta: { transition: 'welcome-route' },
       // 箭头函数 + import() = 懒加载：只有第一次访问 /home 才下载这个 js 文件（独立 chunk）
       component: () => import('@/views/Home.vue'),
       // 访问 /home 时立刻重定向到子路由 home-main（/home/main）

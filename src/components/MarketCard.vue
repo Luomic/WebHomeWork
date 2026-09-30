@@ -33,17 +33,16 @@ watch(() => props.item.image, () => { imageFailed.value = false })
            @error：图片 404/断链时触发，把 imageFailed 置 true → v-else 分支顶上 -->
       <img v-if="item.image && !imageFailed" :src="item.image" :alt="item.title + '，示例素材'" :style="{ objectPosition: item.imagePosition }" loading="lazy" decoding="async" @error="imageFailed = true">
       <!-- v-else：紧跟 v-if 的"否则"分支；{{ }} 插值：把 JS 表达式的值渲染成文字 -->
-      <div v-else class="media-empty"><ImageOff :size="26" aria-hidden="true" /><span>{{ item.kind === 'idle' ? '暂无商品实拍' : '暂无地点实拍' }}</span></div>
+      <div v-else class="media-empty"><ImageOff :size="26" aria-hidden="true" /><span>{{ '暂无商品实拍' }}</span></div>
       <!-- 角标：说明这是示例素材 -->
       <span class="sample-mark">示例</span>
     </div>
     <div class="card-copy">
       <h2>{{ item.title }}</h2>
-      <!-- v-if / v-else：闲置品显示价格，种草内容显示地点 -->
-      <p v-if="item.kind === 'idle'" class="card-price">{{ priceLabel(item.price) }}</p>
-      <p v-else class="card-place"><MapPin :size="14" aria-hidden="true" />{{ item.place }}</p>
+      <!-- 商品卡显示价格。 -->
+      <p class="card-price">{{ priceLabel(item.price) }}</p>
       <!-- 末行元信息：作者 · 类别/地点；aria-hidden 的 · 纯装饰，读屏不念 -->
-      <p class="card-meta">{{ item.author }}<span aria-hidden="true"> · </span>{{ item.kind === 'idle' ? item.place : '种草' }}</p>
+      <p class="card-meta">{{ item.author }}<span aria-hidden="true"> · </span>{{ item.place }}</p>
     </div>
   </Button>
 </template>
@@ -66,4 +65,3 @@ watch(() => props.item.image, () => { imageFailed.value = false })
 .card-meta{font-size:11px;line-height:1.5;color:var(--app-muted);margin:9px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} /* nowrap+ellipsis：一行放不下时显示省略号 */
 @media(prefers-reduced-motion:reduce){.card-media{transition:none}} /* 尊重系统"减少动效" */
 </style>
-

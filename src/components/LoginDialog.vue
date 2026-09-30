@@ -90,7 +90,7 @@ watch(visible, () => {
     <!-- 欢迎语：{{ }} 里是 JS 表达式，registering 为 true 显示注册文案 -->
     <div class="login-intro">
       <h2>{{ registering ? '初次见面，朋友。' : '好久不见，朋友。' }}</h2>
-      <p>{{ registering ? '来这里，分享闲置与附近的好地方。' : '登录市集，让闲置遇见新的主人。' }}</p>
+      <p>{{ registering ? '来这里，发布商品并找到合适的买家。' : '登录市集，让闲置遇见新的主人。' }}</p>
     </div>
     <!-- 登录/注册切换滑块：role="group" 告诉读屏这是一组控件；
          :class 动态挂 is-register 类（CSS 里据此右移滑块） -->

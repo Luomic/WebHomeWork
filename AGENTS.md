@@ -4,7 +4,7 @@
 
 ## 项目背景与结构
 
-- 项目名称：孤独市集，面向校园闲置交易与附近好地方的种草推荐；种草不是活动组局。
+- 项目名称：孤独市集，面向校园闲置商品交易。
 - 技术栈：Vue 3、Vue Router、PrimeVue、Tailwind CSS、Vite，使用 npm 管理依赖。
 - `src/views/`：路由页面；`src/components/`：复用组件。
 - `src/router/index.ts`：路由配置；`src/main.ts`：应用初始化及 PrimeVue 主题配置。

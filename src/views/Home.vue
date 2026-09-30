@@ -6,22 +6,20 @@
 
         <!--整个页面的布局-->
         <!-- h-full!: Tailwind 的 ! 后缀 = !important，压过 PrimeVue 自带高度 -->
-        <SidebarLayout class="h-full! relative!">
+        <SidebarLayout class="h-full! relative! min-w-0">
 
             <!--check device-->
-            <!-- 手机端抽屉打开时铺一层半透明遮罩（v-if：只在手机且侧栏开着时渲染） -->
-            <SidebarBackdrop v-if="isMobile && (navOpen || open)" class="absolute!" />
-
+            <!-- 移动端使用窄抽屉，不额外渲染全屏遮罩。 -->
             <!-- 侧栏容器：id="nav" 供 SidebarTrigger 按名字控制它；
                  side="left" 靠左；collapsible：桌面收成图标列 / 手机整个滑出；
-                 :overlay：手机上加遮罩；v-model:open：开合状态双向绑定 -->
+                 v-model:open：开合状态双向绑定 -->
             <Sidebar id="nav" side="left" :collapsible="isMobile ? 'offcanvas' : 'icon'" :overlay="isMobile"
                 v-model:open="navOpen" width="14rem">
                 <SidebarSpacer />
 
 
                 <!--左侧导航栏-->
-                <SidebarAside>
+                <SidebarAside class="home-nav-aside">
                     <SidebarPanel>
 
                         <!--美味的头菜单-->
@@ -103,27 +101,27 @@
             </Sidebar>
 
             <!-- 主区域 -->
-            <SidebarMain>
+            <SidebarMain class="min-w-0">
                 <!-- 顶栏：h-12 高度、items-center 垂直居中、gap-4 子项间距、px-4 左右内边距 -->
-                <header class="flex h-12 items-center gap-4 border-b border-surface-200 dark:border-surface-700 px-4">
+                <header class="home-header flex h-12 shrink-0 items-center gap-4 border-b border-surface-200 dark:border-surface-700 px-4">
                     <!-- 折叠侧栏的按钮：target="nav" 对应上面 Sidebar 的 id -->
-                    <SidebarTrigger target="nav" severity="secondary" :text="true" size="small">
+                    <SidebarTrigger target="nav" severity="secondary" :text="true" size="small" aria-label="打开或收起导航栏">
                         <SidebarIcon />
                     </SidebarTrigger>
                     <!-- flex-1：吃掉剩余宽度，把右侧按钮推到最右 -->
-                    <span class="text-sm font-medium flex-1">孤独市集</span>
+                    <span class="home-title text-sm font-medium flex-1">孤独市集</span>
                     <!-- 主题按钮：aria-label 会告诉读屏用户点击后将切换到哪种模式。
                          component :is：动态图标——暗色显示太阳、亮色显示月亮 -->
                     <Button class="theme-action" size="small" :aria-label="isDark ? '切换到亮色模式' : '切换到暗色模式'" @click="toggleTheme"><component :is="isDark ? Sun : Moon"/></Button>
                     <Button class="header-action" size="small" @click="openPost()"><Plus aria-hidden="true" />发布</Button>
                     <Button severity="secondary" text size="small" @click="loginVisible = true"><Users aria-hidden="true" />登录</Button>
                 </header>
-                <div class="flex-1 flex flex-col min-h-0">
-                    <!-- 子路由需要单独包裹过渡；父级 Home 不会因自身未卸载而自动触发这里的动画。
-                         :key="route.fullPath"：路径一变 Vue 就视为不同元素，动画必然触发 -->
+                <div class="route-content flex-1 flex flex-col min-h-0">
                     <RouterView v-slot="{ Component, route }">
-                        <Transition name="transition-view" mode="out-in">
-                            <component :is="Component" :key="route.fullPath" />
+                        <Transition name="transition-view">
+                            <div v-if="Component" :key="route.name" class="route-panel flex-1 flex flex-col min-h-0">
+                                <component :is="Component" />
+                            </div>
                         </Transition>
                     </RouterView>
                 </div>
@@ -144,7 +142,7 @@
  * 且每个都要像下面这样单独 import（main.ts 没做全局注册），漏一个就渲染成空标签。
  *
  * isMobile 跟随 (max-width: 1023px) 媒体查询实时变化，决定侧栏是"收成图标"
- * 还是"整个抽屉化 + 遮罩"。
+ * 还是"浮层抽屉，不占主内容宽度"。
  */
 import { inject, onBeforeUnmount, onMounted, provide, ref } from 'vue';
 import { RouterView } from 'vue-router';
@@ -153,7 +151,6 @@ import PostComposer from '@/components/PostComposer.vue';
 import LoginDialog from '@/components/LoginDialog.vue';
 import Sidebar from 'primevue/sidebar';
 import SidebarAside from 'primevue/sidebaraside';
-import SidebarBackdrop from 'primevue/sidebarbackdrop';
 import SidebarContent from 'primevue/sidebarcontent';
 import SidebarFooter from 'primevue/sidebarfooter';
 import SidebarGroup from 'primevue/sidebargroup';
@@ -191,10 +188,9 @@ import Sun from '@primeicons/vue/sun';
 import Moon from '@primeicons/vue/moon';
 
 // 页面级的响应式状态：手机判定 / 三个弹窗开关 / 侧栏开合
-const isMobile = ref(false);
+const isMobile = ref(window.matchMedia('(max-width: 1023px)').matches);
 const loginVisible = ref(false);   // 登录弹窗
-const navOpen = ref(true);         // 侧栏展开？
-const open = ref(false);           // 抽屉叠加状态（PrimeVue 内部用）
+const navOpen = ref(!isMobile.value);         // 侧栏展开？
 const postVisible = ref(false);    // 发布弹窗
 // 从 App.vue 拿全局主题状态和切换函数（兜底给空值防没提供时崩）
 const isDark = inject('isDark', ref(false));
@@ -229,11 +225,26 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* 子路由切换动画：进场从下方 8px 淡入，退场向上 8px 淡出 */
-.transition-view-enter-active, .transition-view-leave-active { transition: opacity .2s ease, transform .2s ease; }
-.transition-view-enter-from { opacity: 0; transform: translateY(8px); }
-.transition-view-leave-to { opacity: 0; transform: translateY(-8px); }
-.transition-view-enter-active, .transition-view-leave-active { flex: 1; min-height: 0; }
+.home-title { white-space: nowrap; min-width: max-content; }
+.home-header > :deep(button) { flex-shrink: 0; white-space: nowrap; }
+@media (max-width: 1023px) {
+    .home-nav-aside { top: 3rem; height: calc(100% - 3rem); }
+}
+@media (max-width: 600px) {
+    .home-header { gap: 6px; padding-inline: 10px; }
+    .home-header > :deep(button) { min-width: 32px; min-height: 36px; padding: 6px 8px; gap: 4px; }
+}
+.route-content { position: relative; overflow: hidden; isolation: isolate; }
+.route-panel { background: var(--app-bg); }
+.transition-view-leave-active { position: absolute; inset: 0; pointer-events: none; }
+.transition-view-enter-active { position: relative; z-index: 1; }
+.transition-view-enter-active, .transition-view-leave-active {
+    transition: opacity .42s cubic-bezier(.22, 1, .36, 1), transform .48s cubic-bezier(.22, 1, .36, 1), clip-path .48s cubic-bezier(.22, 1, .36, 1), filter .35s ease;
+    flex: 1; min-height: 0; will-change: opacity, transform, clip-path;
+    clip-path: inset(0 round 0px);
+}
+.transition-view-enter-from { opacity: 0; transform: translate3d(24px, 8px, 0) rotate(.35deg); clip-path: inset(0 0 0 4% round 16px); filter: blur(2px); }
+.transition-view-leave-to { opacity: 0; transform: translate3d(-18px, -4px, 0) rotate(-.25deg); clip-path: inset(0 4% 0 0 round 16px); filter: blur(1px); }
 .app-shell :deep([data-pc-name="sidebar"]), .app-shell :deep(.p-sidebar) { background: var(--app-surface, #fcfbf8) !important; color: var(--app-text, #24231f); }
 .app-shell :deep([data-pc-name="sidebar"] *) { border-color: var(--app-border, #dedbd3); }
 .post-form { display: flex; flex-direction: column; gap: 10px; font-family: 'Round', system-ui, sans-serif; }
@@ -249,5 +260,5 @@ onBeforeUnmount(() => {
 <style scoped>
 .account-avatar{display:flex;width:28px;height:28px;align-items:center;justify-content:center;border:1px solid var(--app-border);border-radius:8px;background:var(--app-hover);color:var(--app-text)}
 .account-avatar svg{width:16px;height:16px}
-@media(prefers-reduced-motion:reduce){.transition-view-enter-active,.transition-view-leave-active{transition:none}.transition-view-enter-from,.transition-view-leave-to{transform:none}}
+@media(prefers-reduced-motion:reduce){.transition-view-enter-active,.transition-view-leave-active{transition:none}.transition-view-enter-from,.transition-view-leave-to{transform:none;clip-path:none;filter:none}}
 </style>

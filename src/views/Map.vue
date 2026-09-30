@@ -27,13 +27,12 @@ import MarketDetail from '@/components/MarketDetail.vue'
 import { marketItems, categories, campus, browseState, distanceMeters, priceLabel } from '@/data/market'
 import { amapPlugins, mapStyle, locateAmap } from '@/composables/amap'
 const route = useRoute()
-// 只取闲置商品（种草不进地图）
-const items = marketItems.filter(item => item.kind === 'idle')
+const items = marketItems
 const isDark = inject('isDark', ref(false))
 // mapEl=地图容器；listEl=商品列表滚动容器
 const mapEl = ref(null), listEl = ref(null)
 // 初始搜索词：从地图入口带着 item 来 → 置空；带着 q 来 → 用它；否则用市集页存下的
-const query = ref(route.query.item ? '' : typeof route.query.q === 'string' ? route.query.q : browseState.idleQuery)
+const query = ref(route.query.item ? '' : typeof route.query.q === 'string' ? route.query.q : browseState.query)
 // 初始分类：同理（route.query.category 是 URL ?category=xxx 传来的）
 const category = ref(route.query.item ? '全部' : categories.includes(route.query.category) ? route.query.category : browseState.category)
 // URL 带了具体商品 id 就预选中它
@@ -166,7 +165,7 @@ async function locate() {
   } finally { if (!disposed && sequence === locationSequence) { locating.value = false; locationAbort = null } }
 }
 // 搜索词/分类变化：同步回全局浏览状态（回市集页还记得）+ 清聚合组
-watch([query, category], () => { browseState.idleQuery = query.value; browseState.category = category.value; groupIds.value = [] })
+watch([query, category], () => { browseState.query = query.value; browseState.category = category.value; groupIds.value = [] })
 // 匹配结果变了：若选中的被过滤掉了就取消选中，并重画标记
 watch(matchingItems, () => { if (!matchingItems.value.some(item => item.id === selectedId.value)) selectedId.value = null; renderMarkers() })
 watch(selectedId, renderMarkers)   // 选中变化也要重画（换选中样式/zIndex）
@@ -206,7 +205,7 @@ onBeforeUnmount(() => { disposed = true; cleanup() })
       <Transition name="map-control"><Button v-if="areaDirty && ready" class="area-search" severity="secondary" @click="searchArea"><Search :size="15" aria-hidden="true" />搜索此区域</Button></Transition>
       <!-- closable：带关闭按钮；@close 关掉提示条 -->
       <Message v-if="locationNotice" class="location-message" severity="secondary" size="small" closable @close="locationNotice = ''">{{ locationNotice }}</Message>
-      <span v-if="ready" class="map-sample-label">商品为示例 · 不包含种草地点</span>
+      <span v-if="ready" class="map-sample-label">商品为示例</span>
     </div>
     <!-- 详情弹窗：showMap=false——已经在地图页了，不需要"在地图查看"按钮 -->
     <MarketDetail :item="detail" :showMap="false" @close="detail = null" />

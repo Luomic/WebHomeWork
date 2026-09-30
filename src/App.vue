@@ -49,19 +49,12 @@ provide('toggleTheme', () => {
 <template>
   <!-- class="app-shell"：应用外壳，配套样式在下面 <style> 里（铺背景色、占满视口高） -->
   <div class="app-shell">
-    <!-- RouterView：路由出口，当前 URL 对应的页面组件渲染在这里。
-         v-slot="{ Component }"：解构语法，拿到"当前匹配的页面组件"本身（而不是渲染结果），
-         拿到组件对象是为了包一层 <Transition> 做切换动画。
-         注意：Transition 要求每个页面是"单根节点"，多根的页面会被跳过动画 -->
-    <RouterView v-slot="{ Component }">
-    <!-- Transition：Vue 内置的过渡组件，内容切换时自动加/移除过渡类名。
-         name="page"：类名前缀，对应下方 .page-enter-* / .page-leave-* 样式；
-         mode="out-in"：先播完旧页面退场动画，再进新页面（两页不会同时叠在屏上） -->
-    <Transition name="page" mode="out-in">
-      <!-- component :is="..."：动态组件——把变量 Component 当作组件渲染，
-           :is 前的冒号表示属性值是 JS 表达式（变量）而不是字符串 -->
-      <component :is="Component" />
-    </Transition>
+    <RouterView v-slot="{ Component, route }">
+      <Transition :name="String(route.meta.transition ?? 'page')">
+        <div v-if="Component" :key="route.matched[0]?.path" class="route-page">
+          <component :is="Component" />
+        </div>
+      </Transition>
     </RouterView>
   </div>
 </template>
@@ -161,19 +154,23 @@ body { background: var(--app-bg); color: var(--app-text); }
   .post-composer-dialog .p-dialog-header, .place-picker-dialog .p-dialog-header { padding: 18px 16px; }
   .post-composer-dialog .p-dialog-footer, .place-picker-dialog .p-dialog-footer { padding: 12px 16px max(12px,env(safe-area-inset-bottom)); border-top: 1px solid var(--app-border); }
 }
-/* 页面切换动画：Transition name="page" 会按阶段拼类名——
- * -enter-active / -leave-active：过渡进行中（生效 transition 属性）
- * -enter-from / -leave-to：刚进场前一帧 / 离场终态（透明度 0）
- * 组合起来就是 0.25 秒淡入淡出 */
+.route-page { min-height: 100dvh; background: var(--app-bg); }
+.page-leave-active, .welcome-route-leave-active { position: absolute; inset: 0; pointer-events: none; }
+.page-enter-active, .welcome-route-enter-active { position: relative; z-index: 1; }
 .page-enter-active,
-.page-leave-active {
-  transition: opacity 0.25s ease;
-}
+.page-leave-active { transition: opacity .3s ease, transform .3s ease; }
 
-.page-enter-from,
-.page-leave-to {
-  opacity: 0;
+.page-enter-from { opacity: 0; transform: translateY(10px); }
+.page-leave-to { opacity: 0; transform: translateY(-8px); }
+
+.welcome-route-enter-active,
+.welcome-route-leave-active {
+  transition: opacity .62s cubic-bezier(.22, 1, .36, 1), transform .72s cubic-bezier(.22, 1, .36, 1), clip-path .72s cubic-bezier(.22, 1, .36, 1), filter .5s ease;
+  will-change: opacity, transform, clip-path;
+  clip-path: inset(0 round 0px);
 }
+.welcome-route-enter-from { opacity: 0; transform: translate3d(6vw, 0, 0) scale(.985); clip-path: inset(0 0 0 12% round 28px); filter: blur(4px); }
+.welcome-route-leave-to { opacity: 0; transform: translate3d(-2vw, 0, 0) scale(1.015); clip-path: inset(0 10% 0 0 round 28px); filter: blur(2px); }
 
 /* prefers-reduced-motion：尊重系统"减少动态效果"设置，把所有动画压到接近 0 */
 @media (prefers-reduced-motion: reduce) {
@@ -181,8 +178,13 @@ body { background: var(--app-bg); color: var(--app-text); }
     animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important;
   }
   .page-enter-active,
-  .page-leave-active {
+  .page-leave-active,
+  .welcome-route-enter-active,
+  .welcome-route-leave-active {
     transition: none;
+  }
+  .page-enter-from, .page-leave-to, .welcome-route-enter-from, .welcome-route-leave-to {
+    opacity: 1; transform: none; clip-path: none; filter: none;
   }
 }
 </style>
