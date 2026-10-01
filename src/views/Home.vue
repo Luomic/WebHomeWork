@@ -1,27 +1,11 @@
 <template>
-    <!-- 根容器：fixed inset-0 铺满视口（绕开 body 的边距）；flex 纵横布局；
-         border-surface-200 普通边框 / dark:border-surface-700 暗色下的边框（dark: 变体）；
-         overflow-hidden 裁掉溢出 -->
     <div class="fixed inset-0 flex border border-surface-200 dark:border-surface-700 overflow-hidden">
-
-        <!--整个页面的布局-->
-        <!-- h-full!: Tailwind 的 ! 后缀 = !important，压过 PrimeVue 自带高度 -->
         <SidebarLayout class="h-full! relative! min-w-0">
-
-            <!--check device-->
-            <!-- 移动端使用窄抽屉，不额外渲染全屏遮罩。 -->
-            <!-- 侧栏容器：id="nav" 供 SidebarTrigger 按名字控制它；
-                 side="left" 靠左；collapsible：桌面收成图标列 / 手机整个滑出；
-                 v-model:open：开合状态双向绑定 -->
             <Sidebar id="nav" side="left" :collapsible="isMobile ? 'offcanvas' : 'icon'" :overlay="isMobile"
                 v-model:open="navOpen" width="14rem">
                 <SidebarSpacer />
-
-
-                <!--左侧导航栏-->
                 <SidebarAside class="home-nav-aside">
                     <SidebarPanel>
-
                         <!--美味的头菜单-->
                         <SidebarHeader>
                             <SidebarMenu>
@@ -102,16 +86,12 @@
 
             <!-- 主区域 -->
             <SidebarMain class="min-w-0">
-                <!-- 顶栏：h-12 高度、items-center 垂直居中、gap-4 子项间距、px-4 左右内边距 -->
                 <header class="home-header flex h-12 shrink-0 items-center gap-4 border-b border-surface-200 dark:border-surface-700 px-4">
                     <!-- 折叠侧栏的按钮：target="nav" 对应上面 Sidebar 的 id -->
                     <SidebarTrigger target="nav" severity="secondary" :text="true" size="small" aria-label="打开或收起导航栏">
                         <SidebarIcon />
                     </SidebarTrigger>
-                    <!-- flex-1：吃掉剩余宽度，把右侧按钮推到最右 -->
                     <span class="home-title text-sm font-medium flex-1">孤独市集</span>
-                    <!-- 主题按钮：aria-label 会告诉读屏用户点击后将切换到哪种模式。
-                         component :is：动态图标——暗色显示太阳、亮色显示月亮 -->
                     <Button class="theme-action" size="small" :aria-label="isDark ? '切换到亮色模式' : '切换到暗色模式'" @click="toggleTheme"><component :is="isDark ? Sun : Moon"/></Button>
                     <Button class="header-action" size="small" @click="openPost()"><Plus aria-hidden="true" />发布</Button>
                     <Button severity="secondary" text size="small" @click="loginVisible = true"><Users aria-hidden="true" />登录</Button>
@@ -134,16 +114,6 @@
 </template>
 
 <script setup>
-/*
- * /home 的外壳：左侧 PrimeVue Sidebar 导航 + 顶部工具栏 + 子路由出口。
- *
- * ⚠ SidebarLayout / Sidebar / SidebarMenuButton 等是 PrimeVue 5 的 headless
- * 复合组件 —— "无样式、零内置外观"，全靠模板上的 Tailwind 类上色；
- * 且每个都要像下面这样单独 import（main.ts 没做全局注册），漏一个就渲染成空标签。
- *
- * isMobile 跟随 (max-width: 1023px) 媒体查询实时变化，决定侧栏是"收成图标"
- * 还是"浮层抽屉，不占主内容宽度"。
- */
 import { inject, onBeforeUnmount, onMounted, provide, ref } from 'vue';
 import { RouterView } from 'vue-router';
 import Button from 'primevue/button';
@@ -187,12 +157,10 @@ import Plus from '@primeicons/vue/plus';
 import Sun from '@primeicons/vue/sun';
 import Moon from '@primeicons/vue/moon';
 
-// 页面级的响应式状态：手机判定 / 三个弹窗开关 / 侧栏开合
 const isMobile = ref(window.matchMedia('(max-width: 1023px)').matches);
 const loginVisible = ref(false);   // 登录弹窗
 const navOpen = ref(!isMobile.value);         // 侧栏展开？
 const postVisible = ref(false);    // 发布弹窗
-// 从 App.vue 拿全局主题状态和切换函数（兜底给空值防没提供时崩）
 const isDark = inject('isDark', ref(false));
 const toggleTheme = inject('toggleTheme', () => {});
 function openPost() {

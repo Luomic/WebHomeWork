@@ -1,11 +1,4 @@
-import { reactive } from 'vue'   // reactive：创建响应式对象（浏览状态跨页面保留用）
-
-/*
- * 市集的本地数据与共享类型。
- * 接口未接入前，marketItems 是唯一的"内容源"：市集页、地图页、详情弹窗都读它。
- * （全部为演示数据，图片沿用 public/placeholder 的项目素材。）
- */
-
+import { reactive } from 'vue'
 // 发布帖子里"地点"的值对象：POI 搜索结果（source: 'poi'）或地图点选/定位（source: 'map'）
 export interface PlaceValue {
   name: string
@@ -27,11 +20,9 @@ export interface MarketItem {
   position: [number, number]
   description: string
 }
-// 朝晖校区中心点（经度, 纬度）：地图初始视野和"回校区"按钮都指这里。
 export const campus: [number, number] = [120.165741, 30.293231]
 // 箭头函数：拼出图片地址（BASE_URL + placeholder/序号.webp，文件在 public/ 里）
 const asset = (n: number) => import.meta.env.BASE_URL + 'placeholder/' + n + '.webp'
-// 全部为界面演示内容，图片沿用项目素材；不代表真实卖家、库存或地点评价。
 export const marketItems: MarketItem[] = [
   { id: 'idle-01', title: '校园文创套装，笔记本与帆布袋', category: '生活', price: 25, image: asset(1), imagePosition: '50% 45%', ratio: '4 / 5', author: '示例同学 A', place: '图书馆附近', position: [120.1672, 30.2941], description: '用于展示商品图片与信息排版的示例，实际物品状况及交接方式以真实卖家发布为准。' },
   { id: 'idle-02', title: '深蓝校园 T 恤，简洁日常款', category: '服饰', price: 35, image: asset(2), imagePosition: '50% 0%', ratio: '1 / 1', author: '示例同学 B', place: '教学楼附近', position: [120.1638, 30.2917], description: '服饰类目示例。尚未接入商品接口，不提供真实尺码、库存或交易服务。' },
@@ -46,15 +37,16 @@ export const marketItems: MarketItem[] = [
 export const categories = ['全部', '生活', '服饰', '书籍', '数码', '出行']
 // 在路由切换间保留搜索、筛选和滚动位置，只保留会话内的浏览偏好。
 export const browseState = reactive({ query: '', category: '全部', sort: 'default', scroll: 0 })
-// Haversine 公式：按地球球面算两个经纬度点之间的直线距离（米）。
-// 给地图页"我附近 N 公里"筛选和距离标签用，不是步行导航距离。
+
+/**
+ * 返回球面上两点距离
+ * @param a 经度
+ * @param b 纬度
+ * @returns 
+ */
 export function distanceMeters(a: [number, number], b: [number, number]) {
-  // 角度转弧度（三角函数要求弧度）
   const rad = (n: number) => n * Math.PI / 180
-  // 公式的中间量：** 2 是平方；Math.cos/sin 是三角函数
   const x = Math.sin(rad(b[1] - a[1]) / 2) ** 2 + Math.cos(rad(a[1])) * Math.cos(rad(b[1])) * Math.sin(rad(b[0] - a[0]) / 2) ** 2
-  // 6371000 = 地球半径（米）；asin/sqrt 是公式剩余步骤；min(1,x) 防浮点误差超出定义域
   return 6371000 * 2 * Math.asin(Math.sqrt(Math.min(1, x)))
 }
-// 价格展示：0 显示"免费赠送"，其他拼 ¥ 符号
 export const priceLabel = (value?: number) => value === 0 ? '免费赠送' : '¥' + value

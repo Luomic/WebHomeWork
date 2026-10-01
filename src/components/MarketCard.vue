@@ -1,22 +1,13 @@
 <script setup lang="ts">
-// ref：创建响应式数据；watch：监听数据变化
 import { ref, watch } from 'vue'
-// PrimeVue 的按钮组件（这里 unstyled 后只当语义化的"可点卡片"用）
 import Button from 'primevue/button'
-// lucide 图标组件：ImageOff = 图片加载失败图标，MapPin = 地点图钉
 import { ImageOff, MapPin } from 'lucide-vue-next'
-// 价格格式化函数 + 商品数据类型（type 只在编译期存在，import type 不产生真实导入）
 import { priceLabel, type MarketItem } from '@/data/market'
-// defineProps：声明本组件接收的属性——使用方写 <MarketCard :item="商品对象" />
 const props = defineProps<{ item: MarketItem }>()
 // defineEmits：声明本组件会"抛出"哪些事件——子组件 emit('open', item)，
 // 父组件用 @open="..." 接住并弹出详情
 const emit = defineEmits<{ open: [item: MarketItem] }>()
-// 图片加载失败时换成"暂无实拍"占位，不用无关图片顶替；换数据源时重置。
-// ref(false)：初始没失败
 const imageFailed = ref(false)
-// watch：监听"函数返回值"（当前商品的图片地址），变了就把失败标记清零——
-// 换了新图重新给机会加载，不能沿用上一张的失败状态
 watch(() => props.item.image, () => { imageFailed.value = false })
 </script>
 <template>

@@ -68,8 +68,10 @@ export function loadAmap(): Promise<any> {
   }).catch(error => { pending = null; throw error })   // 失败后清空缓存，下次调用重试
   return pending
 }
-// 按需加载 SDK 插件（PlaceSearch / Geocoder / Geolocation 等）。
-// 这些插件不随主 SDK 下载，用到时才异步取，全部就绪后再继续。
+/**
+ * 按需加载 SDK 插件（PlaceSearch / Geocoder / Geolocation 等）。
+ * 这些插件不随主 SDK 下载，用到时才异步取，全部就绪后再继续。
+*/
 export async function amapPlugins(names: string[]): Promise<any> {
   const sdk = await loadAmap()
   return new Promise((resolve, reject) => {
@@ -82,15 +84,19 @@ export async function amapPlugins(names: string[]): Promise<any> {
 // 按主题返回底图样式字符串（高德内置样式名）
 export function mapStyle(dark: boolean) { return dark ? 'amap://styles/dark' : 'amap://styles/whitesmoke' }
 
-// 定位前置检查：返回错误文案（空字符串 = 可以定位）。
-// isSecureContext：安全上下文——浏览器规定 Geolocation 只在 HTTPS 或 localhost 可用
+/**
+ * 定位前置检查：返回错误文案（空字符串 = 可以定位）。
+ * isSecureContext：安全上下文——浏览器规定 Geolocation 只在 HTTPS 或 localhost 可用
+*/
 export function locationContextError(): string {
-  if (!window.isSecureContext) return '当前地址不支持浏览器定位。本地请用 localhost 或 127.0.0.1 访问；局域网 IP 与线上站点需要 HTTPS。'
+  if (!window.isSecureContext) return '当前地址不支持浏览器定位。'
   if (!navigator.geolocation) return '当前浏览器不支持定位，请搜索地点或在地图上选点。'
   return ''
 }
 
-// 从 SDK 错误中提取失败阶段，不展示原始响应、URL、密钥或位置数据。
+/**
+ * 从 SDK 错误中提取失败阶段，不展示原始响应、URL、密钥或位置数据。
+ */
 function locationFailureReason(result: any): string {
   const detail = typeof result === 'string' ? result : [result?.info, result?.message, result?.type, result?.infocode].filter(Boolean).join(' ')
   const reasons: string[] = []
@@ -104,8 +110,8 @@ function locationFailureReason(result: any): string {
   return amapError(result, '定位')
 }
 
-/*
- * 浏览器定位（带兜底重试与取消）。
+/**
+ * 浏览器定位。
  *
  * 过程：先用普通精度试一次；如果只是超时/取不到（暂时性失败）而用户没有拒绝权限，
  * 再用高精度试一次。两次都失败才报错，并把每一轮的原因都攒起来一起展示。
@@ -164,7 +170,9 @@ export function locateAmap(sdk: any, signal: AbortSignal, onProgress: (message: 
   })
 }
 
-// 只提取可识别的错误码，避免将上游响应中的请求参数或密钥显示到界面。
+/**
+ * 只提取可识别的错误码，避免将上游响应中的请求参数或密钥显示到界面。
+*/
 export function amapError(result: any, action = '地图请求'): string {
   const detail = [result?.info, result?.message, result?.type, result?.infocode, result instanceof Error ? result.message : ''].filter(Boolean).join(' ')
   if (/permission|denied|PERMISSION_DENIED/i.test(detail)) return '浏览器未允许定位，请在地址栏的网站权限中允许位置访问后重试。'
