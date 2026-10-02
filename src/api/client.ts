@@ -23,6 +23,7 @@ export class ApiError extends Error {
   }
 }
 
+/** 返回登录状态 */
 function readStoredUser(): LoginResult['user'] | null {
   try {
     const value = localStorage.getItem(USER_KEY)
@@ -37,6 +38,7 @@ export const authState = reactive({
   user: typeof localStorage === 'undefined' ? null : readStoredUser(),
 })
 
+/** 设置用户数据 */
 export function setAuth(result: LoginResult) {
   authState.token = result.token
   authState.user = result.user
@@ -57,15 +59,16 @@ export function resolveAssetUrl(url?: string | null) {
   return API_BASE_URL + (url.startsWith('/') ? '' : '/') + url
 }
 
+/** 异步请求Response */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (!headers.has('Accept')) headers.set('Accept', 'application/json')
-  if (authState.token) headers.set('Authorization', 'Bearer ' + authState.token)
+  if (authState.token) headers.set('Authorization', 'Bearer ' + authState.token) //设置鉴权
   let response: Response
   try {
     response = await fetch(API_BASE_URL + path, { ...init, headers })
   } catch (error) {
-    // fetch 的 TypeError 只有“Failed to fetch”一条信息，补充当前运行方式后才能判断是代理未重启还是后端不可达。
+    // 补充当前运行方式
     const reason = error instanceof Error && error.message ? `（${error.message}）` : ''
     const endpoint = useApiProxy ? '同源 API 代理' : configuredApiBaseUrl
     throw new ApiError(`无法连接 ${endpoint}，请确认服务已启动且网络可达${reason}`, 0)
@@ -82,28 +85,26 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   return (body?.data ?? body) as T
 }
-
+/** 登录方法 */
 export function login(payload: LoginRequest) {
   return request<LoginResult>('/api/auth/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
   }).then(result => { setAuth(result); return result })
 }
-
+/** 注册方法 */
 export function register(payload: RegisterRequest) {
   return request<{ msg?: string }>('/api/auth/register', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
   })
 }
-
+/** 按分页显示 */
 export function getGoods(keyword = '', page = 1) {
   const query = new URLSearchParams({ page: String(Math.max(1, page)) })
   if (keyword.trim()) query.set('keyword', keyword.trim())
   return request<GoodsList<string[]>[]>('/api/goods?' + query)
 }
-
+/** 已排序分页，但反馈是有bug的，这里按下不表 */
 export function getRankedGoods() {
-  // 当前服务端在没有任何已审核商品时会返回 code=404、msg=商品不存在；
-  // 对列表页面来说这等价于空列表，其他错误仍交给页面显示并支持重试。
   return request<GoodsList<string[]>[]>('/api/goods/ranked').catch(error => {
     if (error instanceof ApiError && error.code === 404) return []
     throw error
@@ -138,28 +139,8 @@ export function reportGoods(id: string | number, reason: string) {
   })
 }
 
-// 后端是 Go（GORM）模型直接序列化：ID / CreatedAt / UpdatedAt / DeletedAt 这四个
-// 模型自带字段没写 json tag，返回的是大写开头，而业务字段（title、user_id 等）有小写 tag。
-// 这里把大写字段映射回前端类型使用的 snake_case，有谁补谁，页面代码不需要到处兼容。
-function normalizeGormFields<T>(item: T): T {
-  const data = item as Record<string, unknown>
-  return {
-    ...data,
-    id: data.id ?? data.ID,
-    created_at: data.created_at ?? data.CreatedAt,
-    updated_at: data.updated_at ?? data.UpdatedAt,
-    deleted_at: data.deleted_at ?? data.DeletedAt,
-  } as T
-}
-
-export function getPendingGoods() {
-  return request<GoodsList<string[]>[]>('/api/admin/post/pending')
-    .then(list => list.map(normalizeGormFields))
-}
-export function getAdminReports() {
-  return request<GoodsReport[]>('/api/admin/reports')
-    .then(list => list.map(normalizeGormFields))
-}
+export function getPendingGoods() { return request<GoodsList<string[]>[]>('/api/admin/post/pending') }
+export function getAdminReports() { return request<GoodsReport[]>('/api/admin/reports') }
 
 function formPost<T>(path: string, values: Record<string, string>) {
   return request<T>(path, {
