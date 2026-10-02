@@ -27,10 +27,14 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig(({ mode }) => {
   // loadEnv 第三个参数 'AMAP_' 表示只读取 AMAP_ 开头的变量（不带 VITE_ 前缀，
   // 所以这些值只在 Node 端可用，不会被打进浏览器代码，密钥因此不外泄）
-  const env = loadEnv(mode, process.cwd(), 'AMAP_')
+  // 读取代理所需的 AMAP_* 与 VITE_API_BASE_URL；这些变量只在 Vite Node 配置中使用。
+  const env = loadEnv(mode, process.cwd(), '')
   // ?. 可选链：环境变量不存在时不会报错，而是返回 undefined；trim() 去掉首尾空格
   const proxyTarget = env.AMAP_PROXY_TARGET?.trim()
   const securityCode = env.AMAP_SECURITY_CODE?.trim()
+  // 后端没有返回 CORS 响应头；开发/预览时让 Vite 代浏览器转发 API，
+  // 浏览器只访问同源的 /api 和 /uploads，避免直接跨域请求被拦截。
+  const apiTarget = env.VITE_API_BASE_URL?.trim()
   // 生成"直连高德"代理规则的辅助函数
   function directProxy(target: string) {
     return {
@@ -62,6 +66,10 @@ export default defineConfig(({ mode }) => {
       changeOrigin: true,
     },
   } : undefined
+  const apiProxy = apiTarget ? {
+    '/api': { target: apiTarget, changeOrigin: true },
+    '/uploads': { target: apiTarget, changeOrigin: true },
+  } : undefined
   return {
     // 插件按顺序执行；注意 tailwindcss() 要放在 vue() 后面
     plugins: [
@@ -77,11 +85,11 @@ export default defineConfig(({ mode }) => {
     },
     // server：npm run dev（开发服务器）的配置；proxy：把匹配路径的请求转发出去（解决浏览器跨域）
     server: {
-      proxy: amapProxy,
+      proxy: { ...(amapProxy || {}), ...(apiProxy || {}) },
     },
     // preview：npm run run build 之后 npm run preview（预览构建产物）时应用同样的代理
     preview: {
-      proxy: amapProxy,
+      proxy: { ...(amapProxy || {}), ...(apiProxy || {}) },
     },
   }
 })

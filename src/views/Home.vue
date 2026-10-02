@@ -67,6 +67,29 @@
                                     </SidebarMenu>
                                 </SidebarGroupContent>
                             </SidebarGroup>
+
+                            <!-- 管理员入口默认显示，后续可通过 showAdminPanel 接入权限控制。 -->
+                            <SidebarGroup v-if="showAdminPanel">
+                                <SidebarGroupLabel>管理员面板</SidebarGroupLabel>
+                                <SidebarGroupContent>
+                                    <SidebarMenu>
+                                        <SidebarMenuItem>
+                                            <SidebarMenuButton as="router-link" :to="{ name: 'home-admin', hash: '#pending-goods' }"
+                                                :isActive="$route.name === 'home-admin' && (!$route.hash || $route.hash === '#pending-goods')">
+                                                <span class="admin-menu-marker" aria-hidden="true"></span>
+                                                <span>待审核商品</span>
+                                            </SidebarMenuButton>
+                                        </SidebarMenuItem>
+                                        <SidebarMenuItem>
+                                            <SidebarMenuButton as="router-link" :to="{ name: 'home-admin', hash: '#pending-reports' }"
+                                                :isActive="$route.name === 'home-admin' && $route.hash === '#pending-reports'">
+                                                <span class="admin-menu-marker" aria-hidden="true"></span>
+                                                <span>待审核举报</span>
+                                            </SidebarMenuButton>
+                                        </SidebarMenuItem>
+                                    </SidebarMenu>
+                                </SidebarGroupContent>
+                            </SidebarGroup>
                         </SidebarContent>
 
                         <!-- 底部：账户登录入口 -->
@@ -161,6 +184,8 @@ const isMobile = ref(window.matchMedia('(max-width: 1023px)').matches);
 const loginVisible = ref(false);   // 登录弹窗
 const navOpen = ref(!isMobile.value);         // 侧栏展开？
 const postVisible = ref(false);    // 发布弹窗
+// 权限接入后可由登录态或父级配置控制；目前按需求默认显示。
+const showAdminPanel = ref(true);
 const isDark = inject('isDark', ref(false));
 const toggleTheme = inject('toggleTheme', () => {});
 function openPost() {
@@ -194,6 +219,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .home-title { white-space: nowrap; min-width: max-content; }
+.admin-menu-marker { width: 7px; height: 7px; flex: none; border: 1px solid currentColor; border-radius: 50%; opacity: .7; }
 .home-header > :deep(button) { flex-shrink: 0; white-space: nowrap; }
 @media (max-width: 1023px) {
     .home-nav-aside { top: 3rem; height: calc(100% - 3rem); }

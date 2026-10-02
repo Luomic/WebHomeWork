@@ -24,10 +24,13 @@ import Select from 'primevue/select'
 import Message from 'primevue/message'
 import { Search, MapPin, LocateFixed, RefreshCw, ChevronUp, ChevronDown, ImageOff, ListFilter, X } from 'lucide-vue-next'
 import MarketDetail from '@/components/MarketDetail.vue'
-import { marketItems, categories, campus, browseState, distanceMeters, priceLabel } from '@/data/market'
+import { toMarketItem, categories, campus, browseState, distanceMeters, priceLabel } from '@/data/market'
+import { getRankedGoods, resolveAssetUrl } from '@/api/client'
 import { amapPlugins, mapStyle, locateAmap } from '@/composables/amap'
 const route = useRoute()
-const items = marketItems
+const items = ref([])
+const loadingGoods = ref(false)
+const goodsError = ref('')
 const isDark = inject('isDark', ref(false))
 // mapEl=地图容器；listEl=商品列表滚动容器
 const mapEl = ref(null), listEl = ref(null)
@@ -39,6 +42,7 @@ const category = ref(route.query.item ? '全部' : categories.includes(route.que
 const selectedId = ref(typeof route.query.item === 'string' ? route.query.item : null)
 // detail=详情弹窗商品；ready=地图就绪；loading/error=加载状态；locationNotice=定位提示条
 const detail = ref(null), ready = ref(false), loading = ref(false), error = ref(''), locationNotice = ref('')
+const failedImages = ref(new Set())
 // userPosition=我的坐标；locating=定位中；radius=距离筛选值
 const userPosition = ref(null), locating = ref(false), radius = ref('all')
 // areaDirty=视野变了提示"搜索此区域"；searchBounds=当前视野矩形；groupIds=聚合组内商品 id
@@ -53,20 +57,34 @@ let generation = 0, locationSequence = 0, mapTimer
 let disposed = false
 // 列表的完整过滤链：分类 → 关键词 → 距离（需先定位）→ 视野范围（需点过"搜索此区域"），
 // 最后有定位时按距离从近到远排。距离算的是直线，不是步行路线。
-const matchingItems = computed(() => items.map(item => ({ ...item, distance: userPosition.value ? distanceMeters(userPosition.value, item.position) : null }))
-  .filter(item => (category.value === '全部' || item.category === category.value) && item.title.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase()) && (radius.value === 'all' || item.distance === null || item.distance <= Number(radius.value)) && (!searchBounds.value || (item.position[0] >= searchBounds.value[0] && item.position[0] <= searchBounds.value[2] && item.position[1] >= searchBounds.value[1] && item.position[1] <= searchBounds.value[3])))
-  .sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0)))
+const matchingItems = computed(() => items.value.map(item => ({
+  ...item,
+  distance: userPosition.value && item.position ? distanceMeters(userPosition.value, item.position) : null,
+}))
+  .filter(item => {
+    const needle = query.value.trim().toLocaleLowerCase()
+    const matchesQuery = [item.title, item.description, item.category].join(' ').toLocaleLowerCase().includes(needle)
+    const matchesRadius = radius.value === 'all' || (item.distance !== null && item.distance <= Number(radius.value))
+    const bounds = searchBounds.value
+    const matchesBounds = !bounds || (item.position && item.position[0] >= bounds[0] && item.position[0] <= bounds[2] && item.position[1] >= bounds[1] && item.position[1] <= bounds[3])
+    return (category.value === '全部' || item.category === category.value) && matchesQuery && matchesRadius && matchesBounds
+  })
+  .sort((a, b) => userPosition.value ? (a.distance ?? Infinity) - (b.distance ?? Infinity) : 0))
 // 顶部列表显示哪批商品：点开某个聚合气泡后只显示该组的，否则显示全部匹配项。
 const visibleItems = computed(() => groupIds.value.length ? matchingItems.value.filter(item => groupIds.value.includes(item.id)) : matchingItems.value)
 // 当前选中的商品对象（按 id 从可见列表找）
 const selected = computed(() => visibleItems.value.find(item => item.id === selectedId.value))
 // 距离文案：null=没定位过；米<1000 显示 m，否则显示 km（toFixed(1) 保留 1 位小数）
-function distanceLabel(value) { return value === null ? '公共交接点' : (value < 1000 ? Math.round(value) + ' m' : (value / 1000).toFixed(1) + ' km') + ' · 直线距离' }
+function distanceLabel(item) {
+  if (!item.position) return '接口未提供坐标'
+  const value = item.distance
+  return value === null ? '示例交接点' : (value < 1000 ? Math.round(value) + ' m' : (value / 1000).toFixed(1) + ' km') + ' · 直线距离'
+}
 // 选中某个商品：地图平移过去 + 列表滚到对应行
 async function selectItem(item, pan = true) {
   selectedId.value = item.id
   if (sheetState.value === 'peek') sheetState.value = 'half'   // 抽屉露头时抬到半屏
-  if (pan && map && ready.value) {
+  if (pan && map && ready.value && item.position) {
     map.panTo(item.position)
     // 手机底部列表会覆盖地图下部，把选中点留在面板上方。
     if (window.matchMedia('(max-width: 760px)').matches) map.panBy(0, -(mapEl.value?.clientHeight ?? 0) * .18)
@@ -83,6 +101,8 @@ function renderMarkers() {
   // 注意聚的是"屏幕像素"距离（lngLatToContainer），所以缩放级别变化要重算（zoomend 里调了这里）。
   const groups = []
   for (const item of matchingItems.value) {
+    // 商品接口没有坐标字段；只有明确附带本地示例坐标的项目才绘制标记。
+    if (!item.position) continue
     // 经纬度 → 容器像素坐标
     const pixel = map.lngLatToContainer(item.position)
     const x = pixel.getX(), y = pixel.getY()
@@ -132,7 +152,7 @@ async function start() {
     sdk = await amapPlugins(['AMap.Geolocation', 'AMap.Scale', 'AMap.ToolBar'])
     if (disposed || token !== generation || !mapEl.value) return
     // 如果是带 item id 进来的，初始视野直接对准它
-    const initial = items.find(item => item.id === selectedId.value)
+    const initial = items.value.find(item => item.id === selectedId.value)
     map = new sdk.Map(mapEl.value, { center: initial?.position ?? campus, zoom: 16, zooms: [3, 20], mapStyle: mapStyle(isDark.value), resizeEnable: true, animateEnable: !window.matchMedia('(prefers-reduced-motion: reduce)').matches })
     map.addControl(new sdk.Scale({ position: 'LB' }))            // 左下角比例尺
     map.addControl(new sdk.ToolBar({ position: 'RT', offset: [16, 66] }))   // 右上角缩放工具条
@@ -159,19 +179,46 @@ async function locate() {
     // 换"我的位置"标记：先摘旧再立新；zIndex 200 压过商品标记
     userMarker?.setMap(null); userMarker = new sdk.Marker({ position: userPosition.value, title: '我的位置', zIndex: 200 }); map.add(userMarker)
     searchBounds.value = null; groupIds.value = []; map.panTo(userPosition.value)
-    locationNotice.value = (result.accuracy ? `已取得位置，精度约 ${Math.round(result.accuracy)} 米。` : '已取得位置，请核对地图标记。') + '距离按直线计算，商品仍为固定校区示例。'
+    locationNotice.value = (result.accuracy ? `已取得位置，精度约 ${Math.round(result.accuracy)} 米。` : '已取得位置，请核对地图标记。') + '距离按直线计算，当前商品标记使用本地示例坐标。'
   } catch (cause) {
     if (!disposed && sequence === locationSequence) locationNotice.value = cause instanceof Error ? cause.message : '定位失败，你仍可按校区查看商品。'
   } finally { if (!disposed && sequence === locationSequence) { locating.value = false; locationAbort = null } }
 }
 // 搜索词/分类变化：同步回全局浏览状态（回市集页还记得）+ 清聚合组
-watch([query, category], () => { browseState.query = query.value; browseState.category = category.value; groupIds.value = [] })
+watch([query, category], () => {
+  browseState.query = query.value
+  browseState.category = category.value
+  browseState.first = 0
+  browseState.scroll = 0
+  groupIds.value = []
+})
 // 匹配结果变了：若选中的被过滤掉了就取消选中，并重画标记
 watch(matchingItems, () => { if (!matchingItems.value.some(item => item.id === selectedId.value)) selectedId.value = null; renderMarkers() })
 watch(selectedId, renderMarkers)   // 选中变化也要重画（换选中样式/zIndex）
 watch(isDark, dark => map?.setMapStyle(mapStyle(dark)))
-onMounted(start)
-onBeforeUnmount(() => { disposed = true; cleanup() })
+async function loadGoods() {
+  loadingGoods.value = true
+  goodsError.value = ''
+  try {
+    const goods = await getRankedGoods()
+    items.value = goods.map(item => toMarketItem({
+      ...item,
+      images: Array.isArray(item.images) ? item.images.map(resolveAssetUrl) : [],
+    }))
+    renderMarkers()
+  } catch (error) {
+    goodsError.value = error instanceof Error ? error.message : '商品列表加载失败。'
+  } finally {
+    loadingGoods.value = false
+  }
+}
+const onGoodsUpdated = () => { void loadGoods() }
+onMounted(() => {
+  window.addEventListener('market:goods-updated', onGoodsUpdated)
+  void loadGoods()
+  void start()
+})
+onBeforeUnmount(() => { disposed = true; window.removeEventListener('market:goods-updated', onGoodsUpdated); cleanup() })
 </script>
 <template>
   <!-- :style 挂 CSS 变量 --sheet-offset：抽屉三档对应不同的偏移量，
@@ -182,17 +229,26 @@ onBeforeUnmount(() => { disposed = true; cleanup() })
       <!-- 抽屉把手按钮：aria-expanded 告诉读屏当前展开状态 -->
       <Button unstyled class="sheet-toggle" :aria-expanded="sheetState !== 'peek'" aria-controls="map-panel-content" :aria-label="sheetState === 'full' ? '收起商品列表' : '展开商品列表'" @click="toggleSheet"><span class="sheet-grip"></span><span>{{ visibleItems.length }} 件商品</span><component :is="sheetState === 'full' ? ChevronDown : ChevronUp" :size="18" aria-hidden="true" /></Button>
       <div id="map-panel-content" class="panel-content">
-        <div class="panel-heading"><div><h1>附近商品</h1><p>朝晖校区 · 示例交接地点</p></div><MapPin :size="20" aria-hidden="true" /></div>
+        <div class="panel-heading"><div><h1>附近商品</h1><p>服务端商品 · 位置以接口字段为准</p></div><MapPin :size="20" aria-hidden="true" /></div>
         <label class="map-search"><Search :size="17" aria-hidden="true" /><InputText v-model="query" aria-label="搜索附近商品" placeholder="搜索想找的商品" fluid /></label>
         <!-- 分类下拉 + 距离下拉（没定位过时禁用） -->
         <div class="map-filters"><Select v-model="category" :options="categories" aria-label="商品分类" size="small" /><Select v-model="radius" :options="radiusOptions" optionLabel="label" optionValue="value" aria-label="距离范围，需要先定位" size="small" :disabled="!userPosition" /></div>
-        <div class="list-heading"><span>{{ visibleItems.length }} 件{{ groupIds.length ? '同组' : '' }}商品</span><Button v-if="groupIds.length || searchBounds" label="清除范围" text size="small" severity="secondary" @click="groupIds = []; searchBounds = null" /><small v-else>示例数据</small></div>
+        <div class="list-heading"><span>{{ visibleItems.length }} 件{{ groupIds.length ? '同组' : '' }}商品</span><Button v-if="groupIds.length || searchBounds" label="清除范围" text size="small" severity="secondary" @click="groupIds = []; searchBounds = null" /><small v-else>服务端推荐</small></div>
         <!-- 商品列表：data-id 是自定义属性（data-* 合法），脚本用它定位行 -->
         <div ref="listEl" class="item-list">
-          <article v-for="item in visibleItems" :key="item.id" :data-id="item.id" class="result-item" :class="{ active: selectedId === item.id }"><Button unstyled class="result-button" :aria-pressed="selectedId === item.id" @click="selectItem(item)"><img v-if="item.image" :src="item.image" :alt="item.title + '，示例素材'" :style="{ objectPosition: item.imagePosition }"><span v-else class="result-missing"><ImageOff :size="22" aria-hidden="true" /></span><span class="result-copy"><strong>{{ item.title }}</strong><b>{{ priceLabel(item.price) }}</b><small>{{ item.place }}</small><small>{{ distanceLabel(item.distance) }}</small></span></Button><Transition name="result-reveal"><div v-if="selectedId === item.id" class="result-actions"><Button label="查看商品详情" size="small" severity="secondary" @click="detail = item" /><Button text severity="secondary" size="small" aria-label="取消选中" @click="selectedId = null"><X :size="15" aria-hidden="true" /></Button></div></Transition></article>
+          <article v-for="item in visibleItems" :key="item.id" :data-id="item.id" class="result-item" :class="{ active: selectedId === item.id }">
+            <Button unstyled class="result-button" :aria-pressed="selectedId === item.id" @click="selectItem(item)">
+              <img v-if="item.image && !failedImages.has(item.id)" :src="item.image" :alt="item.title" :style="{ objectPosition: item.imagePosition }" loading="lazy" decoding="async" @error="failedImages.add(item.id)">
+              <span v-else class="result-missing"><ImageOff :size="22" aria-hidden="true" /></span>
+              <span class="result-copy"><strong>{{ item.title }}</strong><b>{{ priceLabel(item.price) }}</b><small>{{ item.place || '未提供交易地点' }}</small><small>{{ distanceLabel(item) }}</small></span>
+            </Button>
+            <Transition name="result-reveal"><div v-if="selectedId === item.id" class="result-actions"><Button label="查看商品详情" size="small" severity="secondary" @click="detail = item" /><Button text severity="secondary" size="small" aria-label="取消选中" @click="selectedId = null"><X :size="15" aria-hidden="true" /></Button></div></Transition>
+          </article>
           <div v-if="!visibleItems.length" class="map-list-empty" role="status"><ListFilter :size="26" aria-hidden="true" /><p>这个范围没有匹配商品</p><Button label="重置筛选" severity="secondary" size="small" @click="resetFilters" /></div>
         </div>
-        <p class="data-note">高德提供底图与定位。商品为本地示例，不代表真实在售。</p>
+        <p v-if="loadingGoods" class="data-note">正在加载服务端商品…</p>
+        <p v-else-if="goodsError" class="data-note">{{ goodsError }} <Button text size="small" label="重试" @click="loadGoods" /></p>
+        <p v-else class="data-note">商品接口暂未定义坐标字段，只有带有位置展示数据的商品会显示地图标记。</p>
       </div>
     </aside>
     <!-- 地图区 -->
@@ -205,7 +261,6 @@ onBeforeUnmount(() => { disposed = true; cleanup() })
       <Transition name="map-control"><Button v-if="areaDirty && ready" class="area-search" severity="secondary" @click="searchArea"><Search :size="15" aria-hidden="true" />搜索此区域</Button></Transition>
       <!-- closable：带关闭按钮；@close 关掉提示条 -->
       <Message v-if="locationNotice" class="location-message" severity="secondary" size="small" closable @close="locationNotice = ''">{{ locationNotice }}</Message>
-      <span v-if="ready" class="map-sample-label">商品为示例</span>
     </div>
     <!-- 详情弹窗：showMap=false——已经在地图页了，不需要"在地图查看"按钮 -->
     <MarketDetail :item="detail" :showMap="false" @close="detail = null" />

@@ -2,16 +2,14 @@
 /*
  * 发布商品弹窗：填写商品信息、照片和交易地点。
  *
- * 数据边界（接口未接入前的约定）：
- *   - 文字草稿只存在内存里，弹窗关闭后保留、刷新页面清空；
- *   - 图片用 URL.createObjectURL 指向本地文件，"仅当前会话可见"，不模拟上传成功；
- *   - 预览是本地拼装出来的样子，不会发布任何内容。
+ * 图片先使用本地 URL 预览，提交时逐张上传，再把服务端返回的图片地址提交给商品接口。
  */
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'     // 单行输入框
 import InputNumber from 'primevue/inputnumber' // 数字输入框
+import Select from 'primevue/select'
 import Textarea from 'primevue/textarea'       // 多行输入框
 import FileUpload from 'primevue/fileupload'   // 文件选择
 import Message from 'primevue/message'         // 提示条
@@ -21,11 +19,13 @@ import { ImagePlus, MapPin, ChevronRight, ChevronLeft, X, Eye, Trash2 } from 'lu
 import PlacePicker from './PlacePicker.vue'
 // categories：商品分类列表；PlaceValue：地点数据类型
 import { categories, type PlaceValue } from '@/data/market'
+import type { GoodsRequest } from '@/types/goods/Goods'
+import { createGoods, uploadGoodsImage } from '@/api/client'
 // interface：TS 的类型声明，编译后消失，只管"编译期对不对得上"
 // 一张待上传照片：file 是原始 File，url 是指向它的本地 blob 链接（预览用）。
 interface LocalPhoto { id: string; file: File; url: string }
 // 一份商品草稿的字段。
-interface Draft { title: string; content: string; price: number | null; category: string; condition: string; place: PlaceValue | null; photos: LocalPhoto[] }
+interface Draft { title: string; content: string; price: number | null; category: string | null; condition: string | null; place: PlaceValue | null; photos: LocalPhoto[] }
 const props = defineProps<{ visible: boolean }>()
 // v-model:visible 的另一半事件
 const emit = defineEmits<{ 'update:visible': [value: boolean] }>()
@@ -37,10 +37,15 @@ const fresh = (): Draft => ({ title: '', content: '', price: null, category: '',
 const draft = reactive<Draft>(fresh())
 const conditions = ['全新', '几乎全新', '正常使用痕迹', '有瑕疵，详见描述']
 // 四个弹窗开关 + 处理中标记（一行声明多个变量）
-const pickerVisible = ref(false), previewVisible = ref(false), clearVisible = ref(false), processing = ref(false)
-const filePicker = ref<any>(null), issue = ref(''), photoNote = ref('')
+const pickerVisible = ref(false), previewVisible = ref(false), clearVisible = ref(false), processing = ref(false), publishing = ref(false)
+const filePicker = ref<any>(null), issue = ref(''), photoNote = ref(''), publishError = ref('')
+const publishResult = ref<{ msg: string; status: string } | null>(null)
 // 预览快照：提交校验通过后把草稿拍成"照片"存进来
-const preview = ref<{ title: string; content: string; price: number; place: PlaceValue; photos: { id: string; url: string }[] } | null>(null)
+// 图片尚未上传，没有可发送的 images URL；本地成色和地点也不属于商品请求体。
+const preview = ref<{
+  goods: Omit<GoodsRequest, 'images'>
+  local: { condition: string | null; place: PlaceValue | null; photos: { id: string; url: string }[] }
+} | null>(null)
 let disposed = false   // 组件是否已卸载：卸载后异步回调不再动数据
 // blob 链接用完必须手动释放，否则文件会一直占着内存直到刷新页面。
 function revoke(photos: LocalPhoto[]) { photos.forEach(photo => URL.revokeObjectURL(photo.url)) }
@@ -92,23 +97,60 @@ function removePhoto(index: number) { const photo = draft.photos[index]; if (!ph
 function movePhoto(index: number, offset: number) { const photos = draft.photos; const to = index + offset; if (to < 0 || to >= photos.length) return; const [photo] = photos.splice(index, 1); if (photo) photos.splice(to, 0, photo) }
 // 清空商品草稿：释放所有 blob → 换新草稿 → 关确认框清提示
 function clearDraft() { revoke(draft.photos); Object.assign(draft, fresh()); clearVisible.value = false; issue.value = ''; photoNote.value = ''; preview.value = null }
-// 提交前校验：按帖子类型逐项检查，第一处不通过就停，问题写在 issue 里给模板显示。
+// 按接口字段校验文字；照片至少一张是当前本地预览的要求。
 // 全部通过才把草稿快照进 preview，打开预览弹窗。
 function previewPost() {
   issue.value = ''
+  publishError.value = ''
+  publishResult.value = null
   const value = draft
   // else if 链：一次只报第一个问题
-  if (!value.photos.length) issue.value = '请至少添加一张照片。'
+  if (!value.photos.length) issue.value = '请至少添加一张照片用于本地预览。'
   else if (!value.title.trim()) issue.value = '请填写商品标题。'
-  else if (!value.content.trim()) issue.value = '请说明物品状况。'
-  // Number.isFinite：排除 NaN/Infinity；价格 0~999999
-  else if (value.price === null || !Number.isFinite(value.price) || value.price < 0 || value.price > 999999) issue.value = '请填写有效价格；免费赠送可填 0。'
-  else if (!value.category || !value.condition) issue.value = '请选择商品分类和成色。'
-  else if (!value.place) issue.value = '请选择公共交接地点。'
-  if (issue.value || !value.place) return
-  // 组装预览快照：trim 文字；地点和坐标都拷贝防串改。
-  preview.value = { title: value.title.trim(), content: value.content.trim(), price: value.price!, place: { ...value.place, position: [...value.place.position] }, photos: value.photos.map(photo => ({ id: photo.id, url: photo.url })) }
+  else if (value.title.length > 100) issue.value = '商品标题最多 100 个字符。'
+  else if (value.content.length > 1000) issue.value = '物品描述最多 1000 个字符。'
+  else if ((value.category?.length || 0) > 32) issue.value = '商品分类最多 32 个字符。'
+  // 排除 NaN/Infinity；非负价格是当前页面的本地输入约定。
+  else if (value.price === null || !Number.isFinite(value.price) || value.price < 0) issue.value = '请填写有效的非负价格；免费赠送可填 0。'
+  if (issue.value) return
+  // 可选字段留空时省略；本地扩展信息单独保存，不拼入 description。
+  preview.value = {
+    goods: {
+      title: value.title.trim(),
+      price: value.price!,
+      ...(value.content.trim() ? { description: value.content.trim() } : {}),
+      ...(value.category?.trim() ? { category: value.category.trim() } : {}),
+    },
+    local: {
+      condition: value.condition,
+      place: value.place ? { ...value.place, position: [...value.place.position] } : null,
+      photos: value.photos.map(photo => ({ id: photo.id, url: photo.url })),
+    },
+  }
   previewVisible.value = true
+}
+// 先上传全部图片，只有每张图片都成功后才创建商品，避免提交 blob 地址给服务端。
+async function publishPost() {
+  if (!preview.value || publishing.value || publishResult.value) return
+  publishing.value = true
+  publishError.value = ''
+  try {
+    const imageUrls: string[] = []
+    for (const photo of draft.photos) {
+      const uploaded = await uploadGoodsImage(photo.file)
+      imageUrls.push(uploaded.url)
+    }
+    const result = await createGoods({ ...preview.value.goods, images: imageUrls })
+    publishResult.value = {
+      msg: result.msg,
+      status: result.goods?.status || 'pending',
+    }
+    window.dispatchEvent(new Event('market:goods-updated'))
+  } catch (error) {
+    publishError.value = error instanceof Error ? error.message : '发布失败，请稍后重试。'
+  } finally {
+    publishing.value = false
+  }
 }
 // 弹窗关闭：把内层的三个子弹窗也一并关掉
 watch(() => props.visible, visible => { if (!visible) { pickerVisible.value = false; previewVisible.value = false; clearVisible.value = false } })
@@ -117,10 +159,10 @@ watch(() => props.visible, visible => { if (!visible) { pickerVisible.value = fa
 </script>
 <template>
   <!-- 主弹窗 -->
-  <Dialog v-model:visible="shown" modal header="发布商品" :draggable="false" class="post-composer-dialog" :style="{ width: '46rem', maxWidth: 'calc(100vw - 2rem)' }">
+  <Dialog v-model:visible="shown" modal header="发布商品" :draggable="false" :closable="!publishing" class="post-composer-dialog" :style="{ width: '46rem', maxWidth: 'calc(100vw - 2rem)' }">
     <!-- form 的 id="post-editor"：让底部页脚的提交按钮能用 form 属性远程关联它 -->
     <form id="post-editor" class="post-editor" @submit.prevent="previewPost">
-      <div class="editor-intro"><p>发布一件商品，写清信息后等待合适的买家。</p><small>图片和草稿仅保留在当前会话，刷新后清空。</small></div>
+      <div class="editor-intro"><p>填写商品信息，查看发布前的本地预览。</p><small>图片和草稿仅保留在当前会话，刷新后清空。</small></div>
       <!-- 照片区：aria-labelledby 把"照片/计数"标题关联给整个区域（无障碍） -->
       <section class="photos-field" aria-labelledby="photo-label"><div class="field-heading"><label id="photo-label">商品照片</label><small>{{ draft.photos.length }} / 9</small></div>
         <!-- TransitionGroup：列表增删/排序时的动画容器；tag="div" 指定实际渲染成 div；
@@ -138,21 +180,21 @@ watch(() => props.visible, visible => { if (!visible) { pickerVisible.value = fa
         <p class="field-hint" role="status">{{ processing ? '正在读取图片…' : photoNote || '支持 JPEG、PNG、WebP，单张不超过 10MB。前移照片可更换封面。' }}</p>
       </section>
 <div class="editor-fields">
-        <div class="editor-field"><label for="post-title">商品标题</label><InputText id="post-title" v-model="draft.title" maxlength="60" placeholder="商品名称、品牌与关键状态" fluid /><span class="field-count">{{ draft.title.length }} / 60</span></div>
-        <div class="editor-field"><label for="post-content">物品描述</label><Textarea id="post-content" v-model="draft.content" maxlength="2000" rows="4" autoResize placeholder="写清成色、配件，以及需要说明的小问题。" fluid /></div>
-        <div class="idle-fields"><div class="editor-field"><label for="post-price">价格（元）</label><InputNumber v-model="draft.price" inputId="post-price" :min="0" :max="999999" :maxFractionDigits="2" :useGrouping="false" placeholder="0 表示赠送" fluid /></div><div class="editor-field"><label for="post-category">分类</label><Select v-model="draft.category" inputId="post-category" :options="categories.slice(1)" placeholder="选择分类" fluid /></div><div class="editor-field"><label for="post-condition">成色</label><Select v-model="draft.condition" inputId="post-condition" :options="conditions" placeholder="选择成色" fluid /></div></div>
-        <div class="editor-field"><span class="field-label">交易地点</span><Button unstyled class="location-field" @click="pickerVisible = true"><MapPin :size="20" aria-hidden="true" /><span><strong>{{ draft.place?.name || '添加公共交接地点' }}</strong><small>{{ draft.place?.address || '高德搜索与地图选点，确认后保存' }}</small></span><ChevronRight :size="18" aria-hidden="true" /></Button></div>
+        <div class="editor-field"><label for="post-title">商品标题</label><InputText id="post-title" v-model="draft.title" maxlength="100" placeholder="商品名称、品牌与关键状态" fluid /><span class="field-count">{{ draft.title.length }} / 100</span></div>
+        <div class="editor-field"><label for="post-content">物品描述（选填）</label><Textarea id="post-content" v-model="draft.content" maxlength="1000" rows="4" autoResize placeholder="写清成色、配件，以及需要说明的小问题。" fluid /><span class="field-count">{{ draft.content.length }} / 1000</span></div>
+        <div class="idle-fields"><div class="editor-field"><label for="post-price">价格（元）</label><InputNumber v-model="draft.price" inputId="post-price" :min="0" :maxFractionDigits="2" :useGrouping="false" placeholder="0 表示赠送" fluid /></div><div class="editor-field"><label for="post-category">分类（选填）</label><Select v-model="draft.category" inputId="post-category" :options="categories.slice(1)" showClear placeholder="选择分类" fluid /></div><div class="editor-field"><label for="post-condition">成色（本地选填）</label><Select v-model="draft.condition" inputId="post-condition" :options="conditions" showClear placeholder="选择成色" fluid /></div></div>
+        <div class="editor-field"><span class="field-label">交易地点（本地选填）</span><Button unstyled class="location-field" @click="pickerVisible = true"><MapPin :size="20" aria-hidden="true" /><span><strong>{{ draft.place?.name || '添加公共交接地点' }}</strong><small>{{ draft.place?.address || '高德搜索与地图选点，仅保存到本地草稿' }}</small></span><ChevronRight :size="18" aria-hidden="true" /></Button></div>
       </div>
       <Message v-if="issue" severity="error" :closable="false" size="small">{{ issue }}</Message>
-      <Message severity="secondary" :closable="false" size="small">发布与上传接口尚未接入。预览不会上传照片，也不会发布帖子。</Message>
+      <Message severity="secondary" :closable="false" size="small">发布时会先上传图片，再提交商品。成色和交易地点不属于商品接口字段，仅保留在本地草稿中。</Message>
     </form>
     <!-- 页脚：#footer 插槽；"预览帖子"用 form="post-editor" 远程提交上面的表单 -->
-    <template #footer><div class="composer-footer"><Button severity="secondary" text :disabled="processing" @click="clearVisible = true"><Trash2 :size="16" aria-hidden="true" /><span>清空当前草稿</span></Button><div><Button label="保留并关闭" severity="secondary" text @click="shown = false" /><Button type="submit" form="post-editor" class="ink-button" :disabled="processing"><Eye :size="16" aria-hidden="true" />预览帖子</Button></div></div></template>
+    <template #footer><div class="composer-footer"><Button severity="secondary" text :disabled="processing || publishing" @click="clearVisible = true"><Trash2 :size="16" aria-hidden="true" /><span>清空当前草稿</span></Button><div><Button label="保留并关闭" severity="secondary" text :disabled="publishing" @click="shown = false" /><Button type="submit" form="post-editor" class="ink-button" :disabled="processing || publishing"><Eye :size="16" aria-hidden="true" />预览商品</Button></div></div></template>
   </Dialog>
   <!-- 地点选择弹窗：@select 的 $event 是 emit 抛出的地点对象，直接写进草稿 -->
   <PlacePicker v-model:visible="pickerVisible" :value="draft.place" @select="draft.place = $event" />
   <!-- 预览弹窗：只读展示快照，不发布 -->
-  <Dialog v-model:visible="previewVisible" modal :draggable="false" header="帖子预览 · 未发布" :style="{ width: '38rem', maxWidth: 'calc(100vw - 2rem)' }"><article v-if="preview" class="post-preview"><div class="preview-photos"><img v-for="photo in preview.photos" :key="photo.id" :src="photo.url" alt="本地照片预览"></div><small>商品</small><h2>{{ preview.title }}</h2><strong class="preview-price">{{ preview.price === 0 ? '免费赠送' : '¥' + preview.price }}</strong><p>{{ preview.content }}</p><div class="preview-place"><MapPin :size="17" aria-hidden="true" /><span>{{ preview.place.name }}</span></div><Message severity="secondary" :closable="false" size="small">仅当前页面可见，未发布。</Message></article></Dialog>
+  <Dialog v-model:visible="previewVisible" modal :draggable="false" :closable="!publishing" :header="publishResult ? '商品已提交' : '商品预览'" :style="{ width: '38rem', maxWidth: 'calc(100vw - 2rem)' }"><article v-if="preview" class="post-preview"><div class="preview-photos"><img v-for="photo in preview.local.photos" :key="photo.id" :src="photo.url" alt="商品照片预览"></div><small>{{ preview.goods.category || '商品' }}</small><h2>{{ preview.goods.title }}</h2><strong class="preview-price">{{ preview.goods.price === 0 ? '免费赠送' : '¥' + preview.goods.price }}</strong><p v-if="preview.goods.description">{{ preview.goods.description }}</p><p v-if="preview.local.condition">成色（本地信息）：{{ preview.local.condition }}</p><div v-if="preview.local.place" class="preview-place"><MapPin :size="17" aria-hidden="true" /><span>{{ preview.local.place.name }}（本地信息）</span></div><Message v-if="publishResult" severity="success" :closable="false" size="small">{{ publishResult.msg || '商品已由服务端接收。' }} 当前审核状态：{{ publishResult.status }}。</Message><Message v-else severity="secondary" :closable="false" size="small">确认发布后，图片会先上传到服务端；成色和交易地点不属于商品接口字段。</Message><Message v-if="publishError" severity="error" :closable="false" size="small">{{ publishError }}</Message></article><template #footer><div class="composer-footer"><span></span><div><Button :label="publishResult ? '完成' : '返回编辑'" severity="secondary" text :disabled="publishing" @click="previewVisible = false" /><Button v-if="!publishResult" class="ink-button" :loading="publishing" :disabled="processing" @click="publishPost"><ImagePlus :size="16" aria-hidden="true" />上传图片并发布</Button></div></div></template></Dialog>
   <!-- 清空确认弹窗：severity="danger" 红色危险按钮 -->
   <Dialog v-model:visible="clearVisible" modal header="清空当前草稿？" :draggable="false" :style="{ width: '24rem', maxWidth: 'calc(100vw - 2rem)' }"><p>将移除当前商品草稿的文字、照片和地点。</p><template #footer><Button label="保留草稿" severity="secondary" text @click="clearVisible = false" /><Button label="确认清空" severity="danger" @click="clearDraft" /></template></Dialog>
 </template>

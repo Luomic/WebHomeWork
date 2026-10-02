@@ -1,16 +1,62 @@
 <script setup lang="ts">
 // 商品详情弹窗。visible 是个"桥接"：父级传 item 进来（有值=打开），
 // 关闭时组件反向 emit('close') 让父级把 item 置空，两边状态保持一致。
-import { computed } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
-import { MapPin, ImageOff } from 'lucide-vue-next'
+import Textarea from 'primevue/textarea'
+import { MapPin, ImageOff, Flag } from 'lucide-vue-next'
 import { priceLabel, type MarketItem } from '@/data/market'
+import { reportGoods } from '@/api/client'
 // item：要展示的商品（null = 弹窗关闭）；showMap：是否显示"在地图查看"按钮
 const props = withDefaults(defineProps<{ item: MarketItem | null; showMap?: boolean }>(), { showMap: true })
 // close：关闭弹窗事件；map：点"在地图查看"时把商品抛给父级
 const emit = defineEmits<{ close: []; map: [item: MarketItem] }>()
+const activeImageIndex = ref(0)
+const failedImages = ref(new Set<string>())
+const reportId = useId()
+const reportOpen = ref(false), reportReason = ref(''), reportIssue = ref('')
+const reportSubmitting = ref(false)
+const reportResult = ref('')
+const images = computed(() => props.item?.images ?? [])
+const activeImage = computed(() => images.value[activeImageIndex.value])
+const statusLabels = { pending: '待审核', approved: '已通过', rejected: '已拒绝', deleted: '已下架' }
+watch(() => props.item?.id, () => {
+  activeImageIndex.value = 0
+  failedImages.value.clear()
+  reportOpen.value = false
+  reportReason.value = ''
+  reportIssue.value = ''
+  reportResult.value = ''
+})
+watch(reportReason, () => {
+  reportIssue.value = ''
+  if (reportReason.value) reportResult.value = ''
+})
+async function submitReport() {
+  reportIssue.value = ''
+  reportResult.value = ''
+  const reason = reportReason.value.trim()
+  if (!reason) reportIssue.value = '请填写举报原因。'
+  else if (reportReason.value.length > 500) reportIssue.value = '举报原因最多 500 个字符。'
+  if (reportIssue.value || !props.item) return
+  reportSubmitting.value = true
+  try {
+    const message = await reportGoods(props.item.id, reason)
+    reportReason.value = ''
+    reportResult.value = message
+  } catch (error) {
+    reportIssue.value = error instanceof Error ? error.message : '举报提交失败，请稍后重试。'
+  } finally {
+    reportSubmitting.value = false
+  }
+}
+function formatDate(value?: string) {
+  if (!value) return '未提供发布时间'
+  const date = new Date(value)
+  return Number.isNaN(date.valueOf()) ? value : date.toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })
+}
 // computed 写成 get/set 形式：读 = item 有值就是打开；写（v-model:visible 改它）=
 // 只有"改成关"才向父级 emit close。桥接组件状态和父级状态
 const visible = computed({
@@ -20,35 +66,65 @@ const visible = computed({
 </script>
 <template>
 
-  <Dialog v-model:visible="visible" modal :draggable="false" class="market-detail-dialog" :header="'商品详情'" :style="{ width: '42rem', maxWidth: 'calc(100vw - 2rem)' }">
+  <Dialog v-model:visible="visible" modal :draggable="false" :closable="!reportSubmitting" class="market-detail-dialog" :header="'商品详情'" :style="{ width: '42rem', maxWidth: 'calc(100vw - 2rem)' }">
     <!-- v-if="item"：没数据时内部什么都不渲染 -->
     <article v-if="item" class="market-detail">
-      <!-- 详情大图；object-fit 用 contain（完整显示不裁剪），背景垫色防留白突兀 -->
-      <img v-if="item.image" class="detail-image" :src="item.image" :alt="item.title + '，项目示例素材'">
+      <!-- 详情大图：按图片原始比例缩放并居中，完整展示且不人为铺满灰色背景。 -->
+      <img v-if="activeImage && !failedImages.has(activeImage)" class="detail-image" :src="activeImage" :alt="item.title + '，第 ' + (activeImageIndex + 1) + ' 张图片'" decoding="async" @error="failedImages.add(activeImage)">
       <!-- 无图占位 -->
       <div v-else class="detail-missing"><ImageOff :size="30" aria-hidden="true" /><span>暂无实拍图片</span></div>
+      <div v-if="images.length > 1" class="detail-gallery" aria-label="选择商品图片">
+        <Button v-for="(url, index) in images" :key="index" unstyled class="detail-thumbnail" :class="{ active: activeImageIndex === index }" :aria-label="'查看第 ' + (index + 1) + ' 张图片'" :aria-pressed="activeImageIndex === index" @click="activeImageIndex = index">
+          <img v-if="!failedImages.has(url)" :src="url" alt="" loading="lazy" decoding="async" @error="failedImages.add(url)">
+          <span v-else>{{ index + 1 }}</span>
+        </Button>
+      </div>
       <!-- 标题行：商品右侧跟价格 -->
-      <div class="detail-heading"><h2>{{ item.title }}</h2><strong v-if="true">{{ priceLabel(item.price) }}</strong></div>
+      <div class="detail-heading"><h2>{{ item.title }}</h2><strong>{{ priceLabel(item.price) }}</strong></div>
       <p class="detail-author">{{ item.author }} · {{ item.category }}</p>
+      <div class="detail-meta"><span>商品 #{{ item.id }}</span><span>{{ statusLabels[item.status] }}</span><time>{{ formatDate(item.createdAt) }}</time></div>
       <p class="detail-description">{{ item.description }}</p>
       <!-- 地点信息块：图钉图标 + 小标签 + 地名 -->
-      <div class="detail-location"><MapPin :size="18" aria-hidden="true" /><div><small>交接地点</small><p>{{ item.place }}</p></div></div>
-      <Message severity="secondary" :closable="false" size="small">示例内容，尚未接入商品接口，不代表真实发布。</Message>
-      <!-- 点击向父级抛 map 事件 -->
-      <Button v-if="showMap && true" class="ink-button" @click="emit('map', item)"><MapPin :size="16" aria-hidden="true" />在地图查看</Button>
+      <div v-if="item.place" class="detail-location"><MapPin :size="18" aria-hidden="true" /><div><small>{{ item.locationSource === 'example' ? '本地示例交接地点' : '交接地点' }}</small><p>{{ item.place }}</p></div></div>
+      <Message v-if="item.isExample" severity="secondary" :closable="false" size="small">当前为本地 API 数据示例，不代表真实在售商品。</Message>
+      <div class="detail-actions">
+        <!-- 点击向父级抛 map 事件 -->
+        <Button v-if="showMap && item.position" class="ink-button" @click="emit('map', item)"><MapPin :size="16" aria-hidden="true" />在地图查看</Button>
+        <Button severity="secondary" text class="detail-report-button" :aria-expanded="reportOpen" :aria-controls="reportId + '-form'" @click="reportOpen = !reportOpen"><Flag :size="16" aria-hidden="true" />举报商品</Button>
+      </div>
+      <Transition name="report-reveal">
+        <form v-if="reportOpen" :id="reportId + '-form'" class="report-form" novalidate @submit.prevent="submitReport">
+          <div class="report-field-heading"><label :for="reportId + '-reason'">举报原因</label><span>{{ reportReason.length }} / 500</span></div>
+          <Textarea :id="reportId + '-reason'" v-model="reportReason" rows="3" maxlength="500" required fluid :invalid="!!reportIssue" :aria-invalid="!!reportIssue" :aria-describedby="reportId + '-hint' + (reportIssue ? ' ' + reportId + '-error' : '')" placeholder="请说明商品存在的问题，例如图片与描述不符、重复发布等。" />
+          <p :id="reportId + '-hint'" class="report-hint">举报原因会提交给管理员审核，最多 500 个字符。</p>
+          <Message v-if="reportIssue" :id="reportId + '-error'" severity="error" :closable="false" size="small" role="alert">{{ reportIssue }}</Message>
+          <Message v-if="reportResult" severity="success" :closable="false" size="small" role="status">{{ reportResult }}</Message>
+          <div class="report-form-actions"><Button label="取消" severity="secondary" text :disabled="reportSubmitting" @click="reportOpen = false" /><Button type="submit" label="提交举报" severity="secondary" outlined :loading="reportSubmitting" :disabled="reportSubmitting" /></div>
+        </form>
+      </Transition>
     </article>
   </Dialog>
 </template>
 <style scoped>
 /* 详情容器：flex 纵向排列，子元素间距 18px；font 简写同时设字号和行高 */
 .market-detail{display:flex;flex-direction:column;gap:18px;font:14px/1.65 system-ui,sans-serif;color:var(--app-text)}
-/* 图片 contain 模式：完整显示不裁剪；背景垫色兜住留白 */
-.detail-image{width:100%;max-height:420px;object-fit:contain;background:var(--app-hover);border-radius:10px}
+/*
+ * 不强制图片占满整行：contain 配合 width:100% 会让窄图两侧出现大片背景色。
+ * 让替换元素按自身比例确定尺寸，再分别限制宽高，图片旁不会生成灰色色块，
+ * 同时仍然不会裁切图片，也不会撑破详情弹窗。
+ */
+.detail-image{display:block;align-self:center;width:auto;max-width:100%;height:auto;max-height:min(420px,60vh);object-fit:contain;background:transparent;border-radius:10px}
+.detail-gallery{display:flex;gap:8px;overflow-x:auto;padding:3px;scrollbar-width:thin}
+.detail-thumbnail{display:grid;place-items:center;flex:none;width:62px;height:62px;padding:0;border:1px solid var(--app-border);border-radius:8px;overflow:hidden;background:var(--app-hover);color:var(--app-muted);cursor:pointer}
+.detail-thumbnail.active{border:2px solid var(--app-text)}
+.detail-thumbnail:focus-visible{outline:2px solid var(--app-text);outline-offset:2px}
+.detail-thumbnail img{width:100%;height:100%;object-fit:cover}
+.detail-meta{display:flex;flex-wrap:wrap;gap:6px 14px;color:var(--app-muted);font-size:11px}
 /* 无图占位块 */
 .detail-missing{min-height:180px;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;background:var(--app-hover);border-radius:10px;color:var(--app-muted)}
 /* 标题行：space-between 把价格推到最右；align-items:baseline 让文字底部对齐 */
 .detail-heading{display:flex;gap:16px;justify-content:space-between;align-items:baseline}
-.detail-heading h2{margin:0;font-size:20px;font-weight:600}
+.detail-heading h2{margin:0;font-size:20px;font-weight:600;min-width:0;overflow-wrap:anywhere}
 .detail-heading strong{font-size:24px;white-space:nowrap;font-variant-numeric:tabular-nums} /* 价格不换行、等宽数字 */
 .detail-author{margin:0;color:var(--app-muted);font-size:12px}
 /* pre-wrap：保留描述里的换行和空格；anywhere：长英文单词也允许断行，防止撑破容器 */
@@ -57,4 +133,19 @@ const visible = computed({
 .detail-location{display:flex;gap:10px;align-items:center;padding:14px;background:var(--app-hover);border-radius:8px}
 .detail-location p{margin:2px 0 0}
 .detail-location small{color:var(--app-muted)}
+.detail-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.detail-report-button{margin-left:auto}
+.report-form{display:flex;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--app-border);border-radius:10px}
+.report-field-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.report-field-heading label{font-size:13px;font-weight:550}
+.report-field-heading span,.report-hint,.report-preview small{color:var(--app-muted);font-size:11px}
+.report-hint{margin:0}
+.report-preview{padding:12px;border:1px solid var(--app-border);border-radius:8px}
+.report-preview strong{font-size:12px;font-weight:550}
+.report-preview p{margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.report-form-actions{display:flex;justify-content:flex-end;gap:8px}
+.report-reveal-enter-active,.report-reveal-leave-active{transition:opacity .18s ease,transform .18s ease}
+.report-reveal-enter-from,.report-reveal-leave-to{opacity:0;transform:translateY(-5px)}
+@media(max-width:480px){.detail-heading{flex-wrap:wrap;gap:6px}.detail-image{max-height:320px}}
+@media(prefers-reduced-motion:reduce){.report-reveal-enter-active,.report-reveal-leave-active{transition:none}.report-reveal-enter-from,.report-reveal-leave-to{transform:none}}
 </style>

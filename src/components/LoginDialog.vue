@@ -1,11 +1,10 @@
 <script setup>
 /*
- * 登录/注册弹窗（接口未接入，仅本地表单体验）。
+ * 登录/注册弹窗：表单校验通过后调用真实认证接口。
  *
  * 校验思路：accountError 等是"这条输入有没有问题"的计算属性（随输入实时变化），
  * 而 xxxInvalid 在它前面多乘一个 submitted —— 没点过提交就不标红，
- * 用户不会边打字边被报错骚扰；点提交后才开始显示。真正的提交在服务接入前
- * 只弹"未接入"提示，不模拟登录成功。
+ * 用户不会边打字边被报错骚扰；点提交后才开始显示，接口错误显示服务端消息。
  */
 // 注意：这个文件没有 lang="ts"，是纯 JS 写法（保持原有风格不迁移）
 import { computed, nextTick, ref, watch } from 'vue'
@@ -14,6 +13,7 @@ import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Password from 'primevue/password'
+import { login, register } from '@/api/client'
 
 // defineModel：声明一个可由父组件双向绑定的 prop（父用 v-model:visible="开关"）。
 // 子组件里直接改 visible，父组件那边的变量自动跟着变——这就是"双向"
@@ -22,26 +22,32 @@ const visible = defineModel('visible', { type: Boolean, default: false })
 const account = ref('')
 const password = ref('')
 const confirmation = ref('')
+const qq = ref('')
+const email = ref('')
 // 当前模式：登录 or 注册
 const mode = ref('login')
 // computed：计算属性——mode 变了它自动重算；.value 读取缓存值
 const registering = computed(() => mode.value === 'register')
 const submitted = ref(false)   // 用户是否点过提交（提交前不显示错误）
-const showNotice = ref(false)  // 是否显示"服务未接入"提示条
+const successNotice = ref('')
+const submitting = ref(false)
+const submitError = ref('')
 
-// 三条校验规则：computed 里是"有错就返回错误文案、没错返回空字符串"。
-// 三元运算符链：条件 ? A : 条件 ? B : C，按顺序判断。
-// /正则/：/^...$/ 表示从头到尾完全匹配；{3,24} 表示 3 到 24 个字符；
-// [a-zA-Z0-9_] 表示只允许字母数字下划线；.test() 返回是否匹配
-const accountError = computed(() => !account.value.trim() ? '请输入账号' : registering.value && !/^[a-zA-Z0-9_]{3,24}$/.test(account.value.trim()) ? '账号使用 3–24 位字母、数字或下划线' : '')
-const passwordError = computed(() => !password.value ? '请输入密码' : registering.value && (password.value.length < 8 || password.value.length > 64) ? '密码长度为 8–64 位' : '')
-const confirmationError = computed(() => registering.value && confirmation.value !== password.value ? '两次输入的密码不一致' : registering.value && !confirmation.value ? '请再次输入密码' : '')
+// 接口只要求账号和密码必填；账号最长 50，文档未约定密码长度和字符规则。
+// 确认密码仅用于本地表单，QQ 和邮箱是注册时的可选字段。
+const accountError = computed(() => !account.value.trim() ? '请输入账号' : account.value.length > 50 ? '账号最多 50 个字符' : '')
+const passwordError = computed(() => !password.value ? '请输入密码' : '')
+const confirmationError = computed(() => registering.value && !confirmation.value ? '请再次输入密码' : registering.value && confirmation.value !== password.value ? '两次输入的密码不一致' : '')
+const qqError = computed(() => registering.value && qq.value.length > 20 ? 'QQ 号最多 20 个字符' : '')
+const emailError = computed(() => registering.value && email.value.length > 100 ? '邮箱最多 100 个字符' : '')
 
 // 真正用来标红的值 = 点过提交 且 有错误文案。
 // !! 把字符串转成布尔值（空串→false，非空→true）
 const accountInvalid = computed(() => submitted.value && !!accountError.value)
 const passwordInvalid = computed(() => submitted.value && !!passwordError.value)
 const confirmationInvalid = computed(() => submitted.value && !!confirmationError.value)
+const qqInvalid = computed(() => submitted.value && !!qqError.value)
+const emailInvalid = computed(() => submitted.value && !!emailError.value)
 
 // async/await：异步函数，await 表示"等这步做完再往下走"
 async function switchMode(value) {
@@ -49,7 +55,7 @@ async function switchMode(value) {
   if (mode.value === value) return
   mode.value = value
   // 切换模式时清空密码相关状态，避免注册的校验残留到登录
-  password.value = ''; confirmation.value = ''; submitted.value = false; showNotice.value = false
+  password.value = ''; confirmation.value = ''; submitted.value = false; successNotice.value = ''; submitError.value = ''
   // nextTick：等 Vue 把 DOM 更新完（确认密码框已经显示出来）再聚焦
   await nextTick()
   // getElementById：按 id 找 DOM 元素；?.：找不到也不报错；focus：把光标放进去
@@ -59,22 +65,47 @@ async function switchMode(value) {
 
 // 提交：标红所有不合法的字段；全部合法时只显示"服务未接入"提示。
 // 不合法时把焦点挪到第一个出错的输入框，键盘用户不用再找。
-function submit() {
+async function submit() {
   submitted.value = true
-  // 三个 invalid 全为 false（没错误）才显示提示——注意这是"模拟不了成功"的诚实提示
-  showNotice.value = !accountInvalid.value && !passwordInvalid.value && !confirmationInvalid.value
-  if (!showNotice.value) nextTick(() => document.getElementById(accountInvalid.value ? 'login-account' : passwordInvalid.value ? 'login-password' : 'register-confirmation')?.focus())
+  successNotice.value = ''
+  submitError.value = ''
+  const valid = !accountInvalid.value && !passwordInvalid.value && !confirmationInvalid.value && !qqInvalid.value && !emailInvalid.value
+  if (valid) {
+    submitting.value = true
+    try {
+      if (registering.value) {
+        await register({ account: account.value.trim(), password: password.value, ...(qq.value ? { qq: qq.value } : {}), ...(email.value ? { email: email.value } : {}) })
+        mode.value = 'login'
+        password.value = ''
+        confirmation.value = ''
+        await nextTick()
+        successNotice.value = '注册成功，请使用新账号登录。'
+      } else {
+        await login({ account: account.value.trim(), password: password.value })
+        visible.value = false
+      }
+    } catch (error) {
+      submitError.value = error instanceof Error ? error.message : '认证请求失败，请稍后重试。'
+    } finally {
+      submitting.value = false
+    }
+  }
+  if (!valid) nextTick(() => document.getElementById(accountInvalid.value ? 'login-account' : passwordInvalid.value ? 'login-password' : confirmationInvalid.value ? 'register-confirmation' : qqInvalid.value ? 'register-qq' : 'register-email')?.focus())
 }
 
 // watch 也支持监听多个数据源（数组）：任何一个输入框有改动就撤掉提示条
-watch([account, password, confirmation], () => { showNotice.value = false })
+watch([account, password, confirmation, qq, email], () => { successNotice.value = '' })
 // 弹窗每次打开都重置回"登录"初始状态，注册留下的输入不残留
 watch(visible, () => {
   mode.value = 'login'
   password.value = ''
   confirmation.value = ''
+  qq.value = ''
+  email.value = ''
   submitted.value = false
-  showNotice.value = false
+  successNotice.value = ''
+  submitError.value = ''
+  submitting.value = false
 })
 </script>
 
@@ -114,13 +145,12 @@ watch(visible, () => {
              autofocus：弹窗打开自动聚焦；fluid：占满整行；
              :invalid：PrimeVue 据此套红色错误态；
              :aria-invalid / :aria-describedby：无障碍——出错时把错误文案的 id 关联过来 -->
-        <InputText id="login-account" v-model="account" placeholder="请输入账号" autocomplete="username"
+        <InputText id="login-account" v-model="account" maxlength="50" placeholder="请输入账号" autocomplete="username"
           autofocus fluid :invalid="accountInvalid" :aria-invalid="accountInvalid"
           :aria-describedby="accountInvalid ? 'login-account-error' : undefined" required />
         <!-- v-if：有错误才渲染错误行；role="alert"：读屏立即播报这条错误 -->
         <small v-if="accountInvalid" id="login-account-error" class="login-error" role="alert">{{ accountError }}</small>
-        <!-- v-else：没错误时显示格式提示；hint-hidden 在登录模式下视觉隐藏但保留占位 -->
-        <small v-else class="field-hint" :class="{ 'hint-hidden': !registering }">3–24 位字母、数字或下划线</small>
+        <small v-else class="field-hint">最多 50 个字符</small>
       </div>
 
       <div class="login-field">
@@ -136,7 +166,6 @@ watch(visible, () => {
             'aria-describedby': passwordInvalid ? 'login-password-error' : undefined,
           }" />
         <small v-if="passwordInvalid" id="login-password-error" class="login-error" role="alert">{{ passwordError }}</small>
-        <small v-else class="field-hint" :class="{ 'hint-hidden': !registering }">8–64 位，建议组合字母、数字和符号</small>
       </div>
       <!-- 确认密码区：登录模式下收起。grid-template-rows 0fr→1fr 动画实现高度过渡；
            :inert：登录模式下这块"不存在的"——不能聚焦不能交互；
@@ -148,17 +177,28 @@ watch(visible, () => {
             <Password v-model="confirmation" input-id="register-confirmation" placeholder="请再次输入密码" autocomplete="new-password" :feedback="false" toggle-mask fluid :invalid="confirmationInvalid" :input-props="{ required: registering, 'aria-invalid': confirmationInvalid, 'aria-describedby': confirmationInvalid ? 'confirmation-error' : undefined }" />
             <small v-if="confirmationInvalid" id="confirmation-error" class="login-error" role="alert">{{ confirmationError }}</small>
           </div>
+          <div class="login-field">
+            <label for="register-qq">QQ 号（选填）</label>
+            <InputText id="register-qq" v-model="qq" maxlength="20" placeholder="最多 20 个字符" fluid :invalid="qqInvalid" :aria-invalid="qqInvalid" :aria-describedby="qqInvalid ? 'register-qq-error' : undefined" />
+            <small v-if="qqInvalid" id="register-qq-error" class="login-error" role="alert">{{ qqError }}</small>
+          </div>
+          <div class="login-field">
+            <label for="register-email">邮箱（选填）</label>
+            <InputText id="register-email" v-model="email" maxlength="100" type="email" autocomplete="email" placeholder="最多 100 个字符" fluid :invalid="emailInvalid" :aria-invalid="emailInvalid" :aria-describedby="emailInvalid ? 'register-email-error' : undefined" />
+            <small v-if="emailInvalid" id="register-email-error" class="login-error" role="alert">{{ emailError }}</small>
+          </div>
         </div>
       </div>
 
       <!-- Message：PrimeVue 提示条；severity="info" 蓝色信息样式；:closable="false" 不带关闭钮 -->
-      <Message v-if="showNotice" severity="info" :closable="false">
-        {{ registering ? '表单校验通过，但注册服务尚未接入，账号还未创建。' : '登录服务尚未接入，本次未登录。你可以先逛逛市集。' }}
+      <Message v-if="successNotice" severity="success" :closable="false">
+        {{ successNotice }}
       </Message>
+      <Message v-if="submitError" severity="error" :closable="false">{{ submitError }}</Message>
 
-      <p class="auth-service-note">目前可体验表单，账号服务尚未开放。</p>
+      <p class="auth-service-note">登录后可发布商品、举报内容；管理员账号可进入审核面板。</p>
       <!-- type="submit"：点击触发 form 的 submit 事件 → 走上面的 @submit.prevent -->
-      <Button type="submit" :label="registering ? '注册' : '登录'" severity="contrast" fluid />
+      <Button type="submit" :label="registering ? '注册' : '登录'" severity="contrast" fluid :loading="submitting" :disabled="submitting" />
       <!-- type="button"：普通按钮，不触发表单提交；text：透明背景的文字按钮 -->
       <Button type="button" label="先逛逛，稍后登录" severity="secondary" text fluid @click="visible = false" />
     </form>
@@ -185,10 +225,9 @@ watch(visible, () => {
 /* 确认密码展开区：0fr→1fr 是 grid 行高动画技巧（0fr=收起，1fr=展开） */
 .confirmation-reveal{display:grid;grid-template-rows:0fr;opacity:0;margin-top:-1rem;transition:grid-template-rows .26s ease,opacity .2s ease,margin-top .26s ease}
 .confirmation-reveal.expanded{grid-template-rows:1fr;opacity:1;margin-top:0}
-.confirmation-inner{overflow:hidden;min-height:0} /* 收起时把内容裁掉 */
+.confirmation-inner{display:flex;flex-direction:column;gap:1rem;overflow:hidden;min-height:0} /* 收起时把内容裁掉 */
 .confirmation-inner>.login-field{padding:2px}
 .field-hint,.auth-service-note{font-size:12px;color:var(--p-text-muted-color);margin:0;line-height:1.6}
-.hint-hidden{visibility:hidden} /* 隐藏但保留占位，避免布局跳动 */
 @media(prefers-reduced-motion:reduce){.auth-switch-indicator,.confirmation-reveal,.auth-switch button{transition:none}}
 
 .login-intro h2 {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import Button from 'primevue/button'
-import { ImageOff, MapPin } from 'lucide-vue-next'
+import { ImageOff } from 'lucide-vue-next'
 import { priceLabel, type MarketItem } from '@/data/market'
 const props = defineProps<{ item: MarketItem }>()
 // defineEmits：声明本组件会"抛出"哪些事件——子组件 emit('open', item)，
@@ -22,18 +22,18 @@ watch(() => props.item.image, () => { imageFailed.value = false })
            loading="lazy"：滚动到附近才加载图片，首屏更快；
            decoding="async"：浏览器后台解码，不卡主线程；
            @error：图片 404/断链时触发，把 imageFailed 置 true → v-else 分支顶上 -->
-      <img v-if="item.image && !imageFailed" :src="item.image" :alt="item.title + '，示例素材'" :style="{ objectPosition: item.imagePosition }" loading="lazy" decoding="async" @error="imageFailed = true">
+      <img v-if="item.image && !imageFailed" :src="item.image" :alt="item.title" :style="{ objectPosition: item.imagePosition }" loading="lazy" decoding="async" @error="imageFailed = true">
       <!-- v-else：紧跟 v-if 的"否则"分支；{{ }} 插值：把 JS 表达式的值渲染成文字 -->
       <div v-else class="media-empty"><ImageOff :size="26" aria-hidden="true" /><span>{{ '暂无商品实拍' }}</span></div>
-      <!-- 角标：说明这是示例素材 -->
-      <span class="sample-mark">示例</span>
+      <span v-if="item.isExample" class="sample-mark">示例</span>
+      <span v-if="item.images.length > 1" class="image-count">{{ item.images.length }} 张</span>
     </div>
     <div class="card-copy">
       <h2>{{ item.title }}</h2>
       <!-- 商品卡显示价格。 -->
       <p class="card-price">{{ priceLabel(item.price) }}</p>
       <!-- 末行元信息：作者 · 类别/地点；aria-hidden 的 · 纯装饰，读屏不念 -->
-      <p class="card-meta">{{ item.author }}<span aria-hidden="true"> · </span>{{ item.place }}</p>
+      <p class="card-meta">{{ item.author }}<span aria-hidden="true"> · </span>{{ item.category }}</p>
     </div>
   </Button>
 </template>
@@ -46,7 +46,7 @@ watch(() => props.item.image, () => { imageFailed.value = false })
 .card-media{position:relative;overflow:hidden;background:var(--app-hover);border:1px solid var(--app-border);border-radius:12px;transition:border-color .18s ease} /* overflow:hidden 裁掉图片出圆角的部分 */
 .market-card:hover .card-media{border-color:var(--app-muted)} /* 悬停时图片框边加深 */
 .card-media img{width:100%;height:100%;object-fit:cover} /* 裁剪填满不变形 */
-.sample-mark{position:absolute;left:10px;bottom:10px;background:var(--app-field);color:var(--app-muted);padding:2px 7px;font-size:10px;border-radius:4px;border:1px solid var(--app-border)} /* 左下角"示例"角标，绝对定位贴角 */
+.sample-mark,.image-count{position:absolute;bottom:9px;padding:2px 7px;background:var(--app-field);color:var(--app-muted);border:1px solid var(--app-border);border-radius:5px;font-size:10px}.sample-mark{left:9px}.image-count{right:9px}
 .media-empty{height:100%;display:flex;flex-direction:column;gap:10px;align-items:center;justify-content:center;color:var(--app-muted);font-size:12px} /* 无图占位：图标+文字居中 */
 .card-copy{padding:12px 2px 5px}
 /* 标题最多两行：-webkit-line-clamp 需要 display:-webkit-box + box-orient + overflow 配合 */
