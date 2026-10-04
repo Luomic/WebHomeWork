@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
 import Button from 'primevue/button'
 import { ImageOff } from 'lucide-vue-next'
 import { priceLabel, type MarketItem } from '@/data/market'
@@ -7,8 +6,7 @@ const props = defineProps<{ item: MarketItem }>()
 // defineEmits：声明本组件会"抛出"哪些事件——子组件 emit('open', item)，
 // 父组件用 @open="..." 接住并弹出详情
 const emit = defineEmits<{ open: [item: MarketItem] }>()
-const imageFailed = ref(false)
-watch(() => props.item.image, () => { imageFailed.value = false })
+console.log(JSON.stringify(props))
 </script>
 <template>
   <!-- unstyled：关掉 PrimeVue 自带外观，纯用自定义 class；
@@ -17,12 +15,8 @@ watch(() => props.item.image, () => { imageFailed.value = false })
   <Button unstyled class="market-card" :aria-label="'查看' + item.title" @click="emit('open', item)">
     <!-- :style 绑定对象语法：键是 CSS 属性、值是 JS 表达式——宽高比由数据动态决定 -->
     <div class="card-media" :style="{ aspectRatio: item.ratio }">
-      <!-- v-if：条件渲染，为假时这个元素完全不出现（区别于 display:none）。
-           条件 = 有图片地址 且 没加载失败。
-           loading="lazy"：滚动到附近才加载图片，首屏更快；
-           decoding="async"：浏览器后台解码，不卡主线程；
-           @error：图片 404/断链时触发，把 imageFailed 置 true → v-else 分支顶上 -->
-      <img v-if="item.image && !imageFailed" :src="item.image" :alt="item.title" :style="{ objectPosition: item.imagePosition }" loading="lazy" decoding="async" @error="imageFailed = true">
+      <!-- 有图片地址时直接展示服务端图片。 -->
+      <img v-if="item.image" :src="item.image" :alt="item.title" :style="{ objectPosition: item.imagePosition }" loading="lazy" decoding="async">
       <!-- v-else：紧跟 v-if 的"否则"分支；{{ }} 插值：把 JS 表达式的值渲染成文字 -->
       <div v-else class="media-empty"><ImageOff :size="26" aria-hidden="true" /><span>{{ '暂无商品实拍' }}</span></div>
       <span v-if="item.isExample" class="sample-mark">示例</span>

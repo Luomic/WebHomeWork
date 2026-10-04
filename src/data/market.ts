@@ -59,7 +59,7 @@ export const goodsItems: GoodsList[] = [
   { id: 20, title: '有线鼠标，轻便办公款', category: '数码', price: 12, images: [], status: 'approved', user_id: 1020, created_at: '2026-09-20T08:20:00+08:00', updated_at: '2026-09-20T08:20:00+08:00', deleted_at: null, description: 'USB 接口，按键和滚轮功能正常。' },
   { id: 21, title: '桌面书立与文件架', category: '生活', price: 14, images: [], status: 'approved', user_id: 1021, created_at: '2026-09-19T19:10:00+08:00', updated_at: '2026-09-19T19:10:00+08:00', deleted_at: null, description: '方便整理桌面书本和资料。' },
   { id: 22, title: '黑色运动外套', category: '服饰', price: 45, images: [], status: 'approved', user_id: 1022, created_at: '2026-09-19T15:35:00+08:00', updated_at: '2026-09-19T15:35:00+08:00', deleted_at: null, description: '轻便运动外套，已清洗。' },
-  { id: 23, title: '英语阅读书籍两本', category: '书籍', price: 0, images: [], status: 'approved', user_id: 1023, created_at: '2026-09-19T11:25:00+08:00', updated_at: '2026-09-19T11:25:00+08:00', deleted_at: null, description: '免费赠送，有阅读批注，希望继续派上用场。' },
+  { id: 23, title: '英语阅读书籍两本', category: '书籍', price: 10, images: [], status: 'approved', user_id: 1023, created_at: '2026-09-19T11:25:00+08:00', updated_at: '2026-09-19T11:25:00+08:00', deleted_at: null, description: '有阅读批注，希望继续派上用场。' },
   { id: 24, title: '便携保温杯', category: '生活', price: 20, images: [], status: 'approved', user_id: 1024, created_at: '2026-09-18T17:50:00+08:00', updated_at: '2026-09-18T17:50:00+08:00', deleted_at: null, description: '杯体完整，已清洁，容量约 500 毫升。' },
 ]
 
@@ -118,4 +118,4 @@ export function distanceMeters(a: [number, number], b: [number, number]) {
   return 6371000 * 2 * Math.asin(Math.sqrt(Math.min(1, x)))
 }
 
-export const priceLabel = (value?: number) => value === undefined ? '价格待议' : value === 0 ? '免费赠送' : '¥' + value
+export const priceLabel = (value?: number) => value === undefined ? '价格待议' : '¥' + value

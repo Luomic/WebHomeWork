@@ -13,10 +13,13 @@ export interface RegisterRequest extends LoginRequest {
     email?: string
 }
 
-/** 登录成功响应中的 data；接口没有返回昵称或用户 ID。 */
+/** 登录成功响应中的 data；兼容返回的账号及用户 ID。 */
 export interface LoginResult {
     token: string
     user: {
+        account?: string
+        user_id?: number
+        id?: number
         level: number
         role: UserRole
     }

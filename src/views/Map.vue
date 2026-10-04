@@ -42,7 +42,6 @@ const category = ref(route.query.item ? '全部' : categories.includes(route.que
 const selectedId = ref(typeof route.query.item === 'string' ? route.query.item : null)
 // detail=详情弹窗商品；ready=地图就绪；loading/error=加载状态；locationNotice=定位提示条
 const detail = ref(null), ready = ref(false), loading = ref(false), error = ref(''), locationNotice = ref('')
-const failedImages = ref(new Set())
 // userPosition=我的坐标；locating=定位中；radius=距离筛选值
 const userPosition = ref(null), locating = ref(false), radius = ref('all')
 // areaDirty=视野变了提示"搜索此区域"；searchBounds=当前视野矩形；groupIds=聚合组内商品 id
@@ -238,7 +237,7 @@ onBeforeUnmount(() => { disposed = true; window.removeEventListener('market:good
         <div ref="listEl" class="item-list">
           <article v-for="item in visibleItems" :key="item.id" :data-id="item.id" class="result-item" :class="{ active: selectedId === item.id }">
             <Button unstyled class="result-button" :aria-pressed="selectedId === item.id" @click="selectItem(item)">
-              <img v-if="item.image && !failedImages.has(item.id)" :src="item.image" :alt="item.title" :style="{ objectPosition: item.imagePosition }" loading="lazy" decoding="async" @error="failedImages.add(item.id)">
+              <img v-if="item.image" :src="item.image" :alt="item.title" :style="{ objectPosition: item.imagePosition }" loading="lazy" decoding="async">
               <span v-else class="result-missing"><ImageOff :size="22" aria-hidden="true" /></span>
               <span class="result-copy"><strong>{{ item.title }}</strong><b>{{ priceLabel(item.price) }}</b><small>{{ item.place || '未提供交易地点' }}</small><small>{{ distanceLabel(item) }}</small></span>
             </Button>

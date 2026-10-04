@@ -8,7 +8,7 @@ import Message from 'primevue/message'
 import { Check, FileWarning, ImageOff, RefreshCw, Search, X } from 'lucide-vue-next'
 import type { GoodsList } from '@/types/goods/Goods'
 import type { GoodsReport } from '@/types/admin/review'
-import { auditGoods, getAdminReports, getPendingGoods, handleReport, resolveAssetUrl } from '@/api/client'
+import { canDeleteGoods, deleteGoods, auditGoods, getAdminReports, getPendingGoods, handleReport, resolveAssetUrl } from '@/api/client'
 
 const route = useRoute()
 const goodsQuery = ref('')
@@ -63,7 +63,20 @@ function formatDate(value?: string | null) {
 }
 
 function priceLabel(value: number) {
-  return value === 0 ? '免费赠送' : `¥${value}`
+  return `¥${value}`
+}
+
+async function removeGoods(item: GoodsList<string[]>) {
+  if (busyGoods.value !== null || !canDeleteGoods(item.user_id) || !window.confirm('确定删除这个帖子吗？')) return
+  busyGoods.value = item.id; goodsNotice.value = ''
+  try {
+    await deleteGoods(item.id)
+    pendingGoods.value = pendingGoods.value.filter(goods => goods.id !== item.id)
+    if (selectedGoods.value?.id === item.id) selectedGoods.value = null
+    goodsNotice.value = '删除成功。'
+    window.dispatchEvent(new Event('market:goods-updated'))
+  } catch (error) { goodsNotice.value = error instanceof Error ? error.message : '删除失败。' }
+  finally { busyGoods.value = null }
 }
 
 // 审核成功后才从当前列表移除，避免把未获服务端确认的操作显示成成功。
@@ -225,6 +238,7 @@ watch(() => route.hash, scrollToHash)
               <Button severity="secondary" outlined size="small" :loading="busyGoods === item.id" :disabled="busyGoods !== null" @click="reviewGoods(item, 'reject')">
                 <X :size="15" aria-hidden="true" />驳回
               </Button>
+              <Button v-if="canDeleteGoods(item.user_id)" severity="danger" outlined size="small" :disabled="busyGoods !== null" @click="removeGoods(item)">删除帖子</Button>
             </div>
           </article>
         </div>

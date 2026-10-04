@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
@@ -10,9 +10,12 @@ import { Search, MapPin, SearchX } from 'lucide-vue-next'
 import MarketCard from '@/components/MarketCard.vue'
 import MarketDetail from '@/components/MarketDetail.vue'
 import { toMarketItem, categories, browseState } from '@/data/market'
-import { getRankedGoods, resolveAssetUrl } from '@/api/client'
+import { getRankedGoods, resolveAssetUrl, getFavorites, authState, isLoggedIn } from '@/api/client'
 
 const router = useRouter()
+const route = useRoute()
+const favoritesOnly = computed(() => route.query.favorites === '1')
+let loadVersion = 0
 const pageEl = ref(null), gridEl = ref(null), selected = ref(null)
 const goodsItems = ref([])
 const feedLoading = ref(false), feedError = ref('')
@@ -63,19 +66,25 @@ function onPage(event) {
 }
 // ranked 接口已按服务端推荐算法排序；这里仅规范图片 URL，不重算推荐顺序。
 async function loadGoods() {
+  const version = ++loadVersion
   feedLoading.value = true
   feedError.value = ''
   try {
-    const goods = await getRankedGoods()
+    if (favoritesOnly.value && !isLoggedIn.value) {
+      goodsItems.value = []; feedError.value = '请先登录后查看收藏。'; return
+    }
+    const goods = await (favoritesOnly.value ? getFavorites() : getRankedGoods())
+    if (version !== loadVersion) return
     goodsItems.value = goods.map(item => ({
       ...item,
       images: Array.isArray(item.images) ? item.images.map(resolveAssetUrl) : [],
     }))
   } catch (error) {
+    if (version !== loadVersion) return
     goodsItems.value = []
     feedError.value = error instanceof Error ? error.message : '商品列表加载失败。'
   } finally {
-    feedLoading.value = false
+    if (version === loadVersion) feedLoading.value = false
   }
 }
 let observer, frame
@@ -134,17 +143,22 @@ watch(totalRecords, total => {
   if (!total) first.value = 0
 }, { immediate: true })
 const onGoodsUpdated = () => { void loadGoods() }
+const onFavoritesUpdated = () => { if (favoritesOnly.value) void loadGoods() }
+watch([favoritesOnly, isLoggedIn, () => authState.token], () => { first.value = 0; selected.value = null; void loadGoods() })
 // 首次请求和发布刷新都会异步替换商品网格；数据变化后重新绑定卡片观察器，
 // 避免节点刚渲染时错过瀑布流行高测量。
 watch(goodsItems, () => { void observeCards() }, { flush: 'post' })
 onMounted(async () => {
   observer = new ResizeObserver(measure)
   window.addEventListener('market:goods-updated', onGoodsUpdated)
+  window.addEventListener('market:favorites-updated', onFavoritesUpdated)
   await Promise.all([restoreFeed(), loadGoods()])
 })
 onBeforeUnmount(() => {
   disconnectGridObserver()
   window.removeEventListener('market:goods-updated', onGoodsUpdated)
+  window.removeEventListener('market:favorites-updated', onFavoritesUpdated)
+  loadVersion++
 })
 </script>
 <template>
@@ -153,7 +167,7 @@ onBeforeUnmount(() => {
       <header class="feed-heading">
         <div>
           <p class="page-context">校园商品交易</p>
-          <h1>逛市集</h1>
+          <h1>{{ favoritesOnly ? '我的收藏' : '逛市集' }}</h1>
         </div><span class="campus-name">
           <MapPin :size="15" aria-hidden="true" />朝晖校区
         </span>
@@ -164,7 +178,7 @@ onBeforeUnmount(() => {
         </label><Button severity="secondary" outlined class="map-link" aria-label="前往地图" @click="openMap()">
           <MapPin :size="16" aria-hidden="true" /><span>前往地图</span>
         </Button></div>
-      <div class="content-switch"><span class="section-label">商品列表</span><span class="total-note">服务端推荐 · 共 {{ totalRecords }} 件商品</span>
+      <div class="content-switch"><span class="section-label">商品列表</span><span class="total-note">{{ favoritesOnly ? '我的收藏' : '服务端推荐' }} · 共 {{ totalRecords }} 件商品</span>
       </div>
       <div class="feed-filters">
         <div class="category-list" aria-label="商品分类">

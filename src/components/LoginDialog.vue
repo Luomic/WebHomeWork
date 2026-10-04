@@ -1,13 +1,6 @@
 <script setup>
-/*
- * 登录/注册弹窗：表单校验通过后调用真实认证接口。
- *
- * 校验思路：accountError 等是"这条输入有没有问题"的计算属性（随输入实时变化），
- * 而 xxxInvalid 在它前面多乘一个 submitted —— 没点过提交就不标红，
- * 用户不会边打字边被报错骚扰；点提交后才开始显示，接口错误显示服务端消息。
- */
-// 注意：这个文件没有 lang="ts"，是纯 JS 写法（保持原有风格不迁移）
-import { computed, nextTick, ref, watch } from 'vue'
+
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
@@ -15,6 +8,8 @@ import Message from 'primevue/message'
 import Password from 'primevue/password'
 import { login, register } from '@/api/client'
 
+
+const isAdmin = defineEmits(['userRole'])
 // defineModel：声明一个可由父组件双向绑定的 prop（父用 v-model:visible="开关"）。
 // 子组件里直接改 visible，父组件那边的变量自动跟着变——这就是"双向"
 const visible = defineModel('visible', { type: Boolean, default: false })
@@ -26,12 +21,123 @@ const qq = ref('')
 const email = ref('')
 // 当前模式：登录 or 注册
 const mode = ref('login')
-// computed：计算属性——mode 变了它自动重算；.value 读取缓存值
 const registering = computed(() => mode.value === 'register')
 const submitted = ref(false)   // 用户是否点过提交（提交前不显示错误）
 const successNotice = ref('')
 const submitting = ref(false)
 const submitError = ref('')
+const captchaContainer = ref(null)
+const captchaError = ref('')
+
+const vaptchaVid = "id_646c591b35952e5"
+const vaptchaVkey = "key_b34ef987bc30c4c1c7c50e"
+let captchaInstance = null
+let captchaLoadPromise = null
+let captchaValues = { token: '', knock: '', dfu: '', ip: '' }
+const captchaValidating = ref(false)
+const captchaPassed = ref(false)
+
+function resetCaptcha() {
+  captchaValues = { token: '', knock: '', dfu: '', ip: '' }
+  captchaError.value = ''
+  captchaPassed.value = false
+  captchaInstance?.reset?.()
+}
+
+function loadVaptchaScript() {
+  if (typeof window !== 'undefined' && typeof window.vaptcha === 'function') return Promise.resolve()
+  if (captchaLoadPromise) return captchaLoadPromise
+  const scriptUrls = [
+    'https://c4.vaptcha.com/src/v4.js',
+    'https://v41.vaptcha.com/v4.js',
+    'https://v-cn.vaptcha.com/v4.js',
+    'https://js.vaptcha.com/v4.js',
+  ]
+  captchaLoadPromise = (async () => {
+    for (const url of scriptUrls) {
+      try {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script')
+          script.src = url
+          script.async = true
+          script.dataset.vaptchaV4 = 'true'
+          script.onload = () => resolve()
+          script.onerror = () => { script.remove(); reject(new Error(url)) }
+          document.head.appendChild(script)
+        })
+        if (typeof window.vaptcha === 'function') return
+      } catch { /* 当前节点不可用时继续尝试备用节点 */ }
+    }
+    throw new Error('Vaptcha 脚本加载失败，请检查网络或域名白名单。')
+  })().catch(error => {
+    captchaLoadPromise = null
+    throw error
+  })
+  return captchaLoadPromise
+}
+
+async function initCaptcha() {
+  if (!registering.value || !visible.value || captchaInstance || !captchaContainer.value) return
+  if (!vaptchaVid || !vaptchaVkey) {
+    captchaError.value = '人机验证暂未配置，请联系管理员。'
+    return
+  }
+  try {
+    await loadVaptchaScript()
+    const factory = window.vaptcha
+    if (!factory) throw new Error('Vaptcha 脚本未就绪')
+    captchaInstance = await factory({
+      vid: vaptchaVid,
+      container: '#vaptcha-container',
+      lang: 'zh-CN',
+    })
+  } catch (error) {
+    captchaInstance = null
+    captchaError.value = error instanceof Error ? error.message : '人机验证加载失败，请稍后重试。'
+  }
+}
+
+async function validateCaptcha() {
+  if (!captchaInstance?.validate) throw new Error('人机验证尚未加载，请稍后重试。')
+  captchaValidating.value = true
+  captchaError.value = ''
+  try {
+    const result = await captchaInstance.validate()
+    if (!result || !result.token || !result.knock) throw new Error('请先完成下方人机验证。')
+    captchaValues = {
+      token: String(result.token),
+      knock: String(result.knock),
+      dfu: String(result.dfu || ''),
+      ip: String(result.ip || ''),
+    }
+    if (!captchaValues.dfu || !captchaValues.ip) throw new Error('人机验证结果不完整，请重试。')
+    captchaPassed.value = true
+    return true
+  } catch (error) {
+    captchaPassed.value = false
+    captchaError.value = error instanceof Error ? error.message : '人机验证未通过，请重试。'
+    return false
+  } finally {
+    captchaValidating.value = false
+  }
+}
+
+async function verifyCaptcha() {
+  if (!captchaPassed.value || !captchaValues.token || !captchaValues.knock || !captchaValues.dfu || !captchaValues.ip) throw new Error(captchaError.value || '请先完成下方人机验证。')
+  const response = await fetch('https://v41.vaptcha.com/api/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vid: vaptchaVid, vkey: vaptchaVkey, token: captchaValues.token, knock: captchaValues.knock, dfu: captchaValues.dfu, ip: captchaValues.ip }),
+  })
+  let body = null
+  try { body = await response.json() } catch { /* verify 接口失败时可能没有 JSON 正文 */ }
+  const code = Number(body?.code)
+  const failedResult = body?.success === false || body?.success === 0 || body?.result === false || body?.result === 0 || body?.result === '0'
+  const hasExplicitSuccess = body?.success === true || body?.success === 1 || body?.result === true || body?.result === 1
+  const failedCode = body?.code !== undefined && code !== 0 && code !== 200
+  const rejected = !response.ok || failedResult || (failedCode && !hasExplicitSuccess)
+  if (rejected) throw new Error(body?.msg || '人机验证未通过，请重试。')
+}
 
 // 接口只要求账号和密码必填；账号最长 50，文档未约定密码长度和字符规则。
 // 确认密码仅用于本地表单，QQ 和邮箱是注册时的可选字段。
@@ -41,39 +147,41 @@ const confirmationError = computed(() => registering.value && !confirmation.valu
 const qqError = computed(() => registering.value && qq.value.length > 20 ? 'QQ 号最多 20 个字符' : '')
 const emailError = computed(() => registering.value && email.value.length > 100 ? '邮箱最多 100 个字符' : '')
 
-// 真正用来标红的值 = 点过提交 且 有错误文案。
-// !! 把字符串转成布尔值（空串→false，非空→true）
+// 用来标红的值 = 点过提交 且 有错误文案。
 const accountInvalid = computed(() => submitted.value && !!accountError.value)
 const passwordInvalid = computed(() => submitted.value && !!passwordError.value)
 const confirmationInvalid = computed(() => submitted.value && !!confirmationError.value)
 const qqInvalid = computed(() => submitted.value && !!qqError.value)
 const emailInvalid = computed(() => submitted.value && !!emailError.value)
 
-// async/await：异步函数，await 表示"等这步做完再往下走"
 async function switchMode(value) {
-  // 点的就是当前模式，不用切
   if (mode.value === value) return
   mode.value = value
   // 切换模式时清空密码相关状态，避免注册的校验残留到登录
   password.value = ''; confirmation.value = ''; submitted.value = false; successNotice.value = ''; submitError.value = ''
-  // nextTick：等 Vue 把 DOM 更新完（确认密码框已经显示出来）再聚焦
+  if (value === 'register') resetCaptcha()
+  // nextTick：等 Vue 把 DOM 更新完
   await nextTick()
   // getElementById：按 id 找 DOM 元素；?.：找不到也不报错；focus：把光标放进去
   // preventScroll：聚焦时不自动滚动页面
   document.getElementById('login-account')?.focus({ preventScroll: true })
 }
 
-// 提交：标红所有不合法的字段；全部合法时只显示"服务未接入"提示。
-// 不合法时把焦点挪到第一个出错的输入框，键盘用户不用再找。
+// 不合法时把焦点挪到第一个出错的输入框。
 async function submit() {
   submitted.value = true
   successNotice.value = ''
   submitError.value = ''
   const valid = !accountInvalid.value && !passwordInvalid.value && !confirmationInvalid.value && !qqInvalid.value && !emailInvalid.value
   if (valid) {
+    if (registering.value && !captchaPassed.value) {
+      captchaError.value = '请先完成人机验证后再注册。'
+      return
+    }
     submitting.value = true
     try {
       if (registering.value) {
+        await verifyCaptcha()
         await register({ account: account.value.trim(), password: password.value, ...(qq.value ? { qq: qq.value } : {}), ...(email.value ? { email: email.value } : {}) })
         mode.value = 'login'
         password.value = ''
@@ -81,11 +189,13 @@ async function submit() {
         await nextTick()
         successNotice.value = '注册成功，请使用新账号登录。'
       } else {
-        await login({ account: account.value.trim(), password: password.value })
+        const loginStatus = await login({ account: account.value.trim(), password: password.value })
+        isAdmin('userRole',loginStatus.user.role)
         visible.value = false
       }
     } catch (error) {
-      submitError.value = error instanceof Error ? error.message : '认证请求失败，请稍后重试。'
+      if (registering.value) resetCaptcha()
+      submitError.value = error instanceof Error ? error.message : '网络错误，认证请求失败，请稍后重试。'
     } finally {
       submitting.value = false
     }
@@ -93,9 +203,14 @@ async function submit() {
   if (!valid) nextTick(() => document.getElementById(accountInvalid.value ? 'login-account' : passwordInvalid.value ? 'login-password' : confirmationInvalid.value ? 'register-confirmation' : qqInvalid.value ? 'register-qq' : 'register-email')?.focus())
 }
 
-// watch 也支持监听多个数据源（数组）：任何一个输入框有改动就撤掉提示条
 watch([account, password, confirmation, qq, email], () => { successNotice.value = '' })
-// 弹窗每次打开都重置回"登录"初始状态，注册留下的输入不残留
+watch([visible, registering], async () => {
+  if (visible.value && registering.value) {
+    await nextTick()
+    await initCaptcha()
+  }
+})
+// 弹窗每次打开都重置回"登录"初始状态
 watch(visible, () => {
   mode.value = 'login'
   password.value = ''
@@ -106,15 +221,13 @@ watch(visible, () => {
   successNotice.value = ''
   submitError.value = ''
   submitting.value = false
+  resetCaptcha()
 })
+
+onBeforeUnmount(() => { captchaInstance?.reset?.(); captchaInstance = null })
 </script>
 
 <template>
-  <!-- v-model:visible="visible"：双向绑定弹窗开关（点 X/遮罩关闭时子组件改 visible，父同步）；
-       modal：打开时背景加半透明遮罩、锁滚动；
-       :header：弹窗标题，按注册/登录动态切换；
-       :draggable="false"：禁止拖拽弹窗；
-       :style：宽度 27rem，但最宽不超过"视口宽减 2rem"，手机上留出边距 -->
   <Dialog v-model:visible="visible" modal :header="registering ? '注册孤独市集' : '登录孤独市集'" :draggable="false"
     :style="{ width: '27rem', maxWidth: 'calc(100vw - 2rem)' }"
     :pt="{ root: { class: 'market-login-dialog' } }">
@@ -187,6 +300,10 @@ watch(visible, () => {
             <InputText id="register-email" v-model="email" maxlength="100" type="email" autocomplete="email" placeholder="最多 100 个字符" fluid :invalid="emailInvalid" :aria-invalid="emailInvalid" :aria-describedby="emailInvalid ? 'register-email-error' : undefined" />
             <small v-if="emailInvalid" id="register-email-error" class="login-error" role="alert">{{ emailError }}</small>
           </div>
+          <div id="vaptcha-container" ref="captchaContainer" class="vaptcha-container" aria-label="人机验证">
+            <Button type="button" :label="captchaPassed ? '验证已完成' : '点击完成人机验证'" severity="secondary" outlined :loading="captchaValidating" :disabled="captchaValidating || captchaPassed" @click="validateCaptcha" />
+          </div>
+          <small v-if="captchaError" class="login-error" role="alert">{{ captchaError }}</small>
         </div>
       </div>
 
@@ -196,7 +313,7 @@ watch(visible, () => {
       </Message>
       <Message v-if="submitError" severity="error" :closable="false">{{ submitError }}</Message>
 
-      <p class="auth-service-note">登录后可发布商品、举报内容；管理员账号可进入审核面板。</p>
+      <p class="auth-service-note">登录后可发布商品、举报内容。</p>
       <!-- type="submit"：点击触发 form 的 submit 事件 → 走上面的 @submit.prevent -->
       <Button type="submit" :label="registering ? '注册' : '登录'" severity="contrast" fluid :loading="submitting" :disabled="submitting" />
       <!-- type="button"：普通按钮，不触发表单提交；text：透明背景的文字按钮 -->
@@ -262,5 +379,11 @@ watch(visible, () => {
 
 .login-error {
   color: var(--p-red-500);
+}
+
+.vaptcha-container {
+  min-height: 44px;
+  display: flex;
+  justify-content: center;
 }
 </style>

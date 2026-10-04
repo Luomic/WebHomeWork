@@ -1,6 +1,7 @@
-import { reactive } from 'vue'
+import { computed, reactive } from 'vue'
 import type { GoodsList, GoodsPost, GoodImg, GoodsRequest } from '@/types/goods/Goods'
 import type { GoodsReport, GoodsAuditAction, ReportHandleAction } from '@/types/admin/review'
+import type { DayGet } from '@/types/report/day'
 import type { LoginRequest, LoginResult, RegisterRequest } from '@/types/auth/Login'
 
 /**
@@ -34,12 +35,14 @@ function readStoredUser(): LoginResult['user'] | null {
 }
 
 export const authState = reactive({
+  validated: false,
   token: typeof localStorage === 'undefined' ? '' : localStorage.getItem(TOKEN_KEY) || '',
   user: typeof localStorage === 'undefined' ? null : readStoredUser(),
 })
 
 /** 设置用户数据 */
 export function setAuth(result: LoginResult) {
+  authState.validated = true
   authState.token = result.token
   authState.user = result.user
   localStorage.setItem(TOKEN_KEY, result.token)
@@ -47,6 +50,7 @@ export function setAuth(result: LoginResult) {
 }
 
 export function clearAuth() {
+  authState.validated = false
   authState.token = ''
   authState.user = null
   localStorage.removeItem(TOKEN_KEY)
@@ -55,7 +59,19 @@ export function clearAuth() {
 
 export function resolveAssetUrl(url?: string | null) {
   if (!url) return ''
-  if (/^https?:\/\//i.test(url) || url.startsWith('blob:') || url.startsWith('data:')) return url
+  if (url.startsWith('blob:') || url.startsWith('data:')) return url
+  if (/^https?:\/\//i.test(url) || url.startsWith('//')) {
+    // 后端绝对图片地址也走同源代理，避免 HTTPS 页面加载 HTTP 图片被拦截。
+    if (useApiProxy) {
+      try {
+        const assetUrl = new URL(url, configuredApiBaseUrl)
+        if (assetUrl.origin === new URL(configuredApiBaseUrl).origin) {
+          return assetUrl.pathname + assetUrl.search + assetUrl.hash
+        }
+      } catch { return url }
+    }
+    return url
+  }
   return API_BASE_URL + (url.startsWith('/') ? '' : '/') + url
 }
 
@@ -64,6 +80,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (!headers.has('Accept')) headers.set('Accept', 'application/json')
   if (authState.token) headers.set('Authorization', 'Bearer ' + authState.token) //设置鉴权
+  const sessionToken = authState.token
   let response: Response
   try {
     response = await fetch(API_BASE_URL + path, { ...init, headers })
@@ -76,11 +93,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let body: any = null
   try { body = await response.json() } catch { /* 个别无正文响应不需要 JSON 解码 */ }
   if (!response.ok) {
-    if (response.status === 401) clearAuth()
-    throw new ApiError(body?.msg || '请求失败（' + response.status + '）', response.status, body?.code)
+    if (response.status === 401 && authState.token === sessionToken) clearAuth()
+    throw new ApiError(body?.msg || body?.error || '请求失败（' + response.status + '）', response.status, body?.code)
   }
   if (body && typeof body.code === 'number' && body.code !== 200 && body.code !== 0) {
-    if (body.code === 401) clearAuth()
+    if (body.code === 401 && authState.token === sessionToken) clearAuth()
     throw new ApiError(body.msg || '接口返回业务错误', response.status, body.code)
   }
   return (body?.data ?? body) as T
@@ -89,7 +106,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export function login(payload: LoginRequest) {
   return request<LoginResult>('/api/auth/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-  }).then(result => { setAuth(result); return result })
+  }).then(result => { result.user = { ...result.user, account: result.user.account || payload.account }; setAuth(result); return result })
 }
 /** 注册方法 */
 export function register(payload: RegisterRequest) {
@@ -115,8 +132,17 @@ export function getGoodsDetail(id: string | number) {
   return request<GoodsList<string[]>>('/api/goods/' + encodeURIComponent(id))
 }
 
-export function verifySession() {
-  return request<void>('/api/auth/me')
+export async function verifySession() {
+  const token = authState.token
+  if (!token) return
+  const profile = await request<Partial<LoginResult['user']> & { user?: Partial<LoginResult['user']> }>('/api/auth/me')
+  if (authState.token !== token) return
+  authState.validated = true
+  const user = profile?.user ?? profile
+  if (authState.user && typeof user?.account === 'string' && user.account) {
+    authState.user.account = user.account
+    localStorage.setItem(USER_KEY, JSON.stringify(authState.user))
+  }
 }
 
 export function uploadGoodsImage(file: File) {
@@ -126,6 +152,7 @@ export function uploadGoodsImage(file: File) {
 }
 
 export function createGoods(payload: GoodsRequest) {
+  if (!Number.isFinite(payload.price) || payload.price <= 0) throw new Error('商品价格必须大于 0。')
   return request<GoodsPost<string[]>>('/api/goods', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
   })
@@ -155,4 +182,30 @@ export function auditGoods(id: number, action: GoodsAuditAction) {
 
 export function handleReport(id: number, action: ReportHandleAction) {
   return formPost<string>('/api/admin/reports/' + id + '/handle', { action })
+}
+
+// JWT 仅用于界面识别本人；实际操作权限始终由服务端校验。
+export const isLoggedIn = computed(() => !!authState.token && authState.validated)
+export const currentUserId = computed(() => {
+  if (!isLoggedIn.value) return null
+  const storedId = Number(authState.user?.user_id ?? authState.user?.id)
+  if (Number.isFinite(storedId) && storedId > 0) return storedId
+  try {
+    const part = authState.token.split('.')[1]!
+    const payload = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')))
+    const id = Number(payload.user_id)
+    return Number.isFinite(id) && id > 0 ? id : null
+  } catch { return null }
+})
+export function canDeleteGoods(userId?: number) {
+  return isLoggedIn.value && (authState.user?.role === 'admin' || (currentUserId.value !== null && String(currentUserId.value) === String(userId)))
+}
+export function deleteGoods(id: string | number) {
+  const path = authState.user?.role === 'admin' ? '/api/admin/posts/' : '/api/goods/'
+  return request<void>(path + encodeURIComponent(id), { method: 'DELETE' })
+}
+export function signIn() { return request<DayGet>('/api/user/sign-in', { method: 'POST' }) }
+export function getFavorites() { return request<GoodsList<string[]>[]>('/api/posts/my-favorite') }
+export function setFavorite(id: string | number, favorite: boolean) {
+  return request<string>('/api/posts/' + encodeURIComponent(id) + '/favorite', { method: favorite ? 'POST' : 'DELETE' })
 }

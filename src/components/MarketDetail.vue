@@ -8,13 +8,55 @@ import Message from 'primevue/message'
 import Textarea from 'primevue/textarea'
 import { MapPin, ImageOff, Flag } from 'lucide-vue-next'
 import { priceLabel, type MarketItem } from '@/data/market'
-import { reportGoods } from '@/api/client'
+import Star from '@primeicons/vue/star'
+import StarFill from '@primeicons/vue/star-fill'
+import { reportGoods, authState, isLoggedIn, currentUserId, canDeleteGoods, deleteGoods, getFavorites, setFavorite } from '@/api/client'
 // item：要展示的商品（null = 弹窗关闭）；showMap：是否显示"在地图查看"按钮
 const props = withDefaults(defineProps<{ item: MarketItem | null; showMap?: boolean }>(), { showMap: true })
 // close：关闭弹窗事件；map：点"在地图查看"时把商品抛给父级
 const emit = defineEmits<{ close: []; map: [item: MarketItem] }>()
 const activeImageIndex = ref(0)
-const failedImages = ref(new Set<string>())
+const actionIssue = ref(''), actionNotice = ref('')
+const deleting = ref(false), favoriteBusy = ref(false), favoriteReady = ref(false), favorited = ref(false)
+const canDelete = computed(() => !!props.item && !props.item.isExample && canDeleteGoods(props.item.userId))
+const ownPost = computed(() => currentUserId.value !== null && String(currentUserId.value) === String(props.item?.userId))
+let favoriteLoad = 0
+watch([() => props.item?.id, () => authState.token, isLoggedIn], async () => {
+  const version = ++favoriteLoad
+  actionIssue.value = ''; actionNotice.value = ''; favorited.value = false; favoriteReady.value = false
+  if (!props.item || !isLoggedIn.value || props.item.isExample || ownPost.value) return
+  try {
+    const items = await getFavorites()
+    if (version !== favoriteLoad) return
+    favorited.value = items.some(item => String(item.id) === props.item?.id)
+    favoriteReady.value = true
+  } catch (error) {
+    if (version === favoriteLoad) actionIssue.value = error instanceof Error ? error.message : '收藏状态加载失败，请重新打开详情。'
+  }
+}, { immediate: true })
+async function toggleFavorite() {
+  if (!props.item || favoriteBusy.value || !favoriteReady.value) return
+  const id = props.item.id, token = authState.token, next = !favorited.value
+  favoriteBusy.value = true; actionIssue.value = ''; actionNotice.value = ''
+  try {
+    const message = await setFavorite(id, next)
+    if (token !== authState.token) return
+    if (props.item?.id === id) { favorited.value = next; actionNotice.value = message }
+    window.dispatchEvent(new Event('market:favorites-updated'))
+  } catch (error) { actionIssue.value = error instanceof Error ? error.message : '收藏操作失败。' }
+  finally { favoriteBusy.value = false }
+}
+async function removePost() {
+  if (!props.item || !canDelete.value || deleting.value || !window.confirm('确定删除这个帖子吗？')) return
+  const id = props.item.id
+  deleting.value = true; actionIssue.value = ''
+  try {
+    await deleteGoods(id)
+    window.dispatchEvent(new Event('market:goods-updated'))
+    if (props.item?.id === id) emit('close')
+  } catch (error) { actionIssue.value = error instanceof Error ? error.message : '删除失败。' }
+  finally { deleting.value = false }
+}
 const reportId = useId()
 const reportOpen = ref(false), reportReason = ref(''), reportIssue = ref('')
 const reportSubmitting = ref(false)
@@ -24,7 +66,6 @@ const activeImage = computed(() => images.value[activeImageIndex.value])
 const statusLabels = { pending: '待审核', approved: '已通过', rejected: '已拒绝', deleted: '已下架' }
 watch(() => props.item?.id, () => {
   activeImageIndex.value = 0
-  failedImages.value.clear()
   reportOpen.value = false
   reportReason.value = ''
   reportIssue.value = ''
@@ -66,17 +107,16 @@ const visible = computed({
 </script>
 <template>
 
-  <Dialog v-model:visible="visible" modal :draggable="false" :closable="!reportSubmitting" class="market-detail-dialog" :header="'商品详情'" :style="{ width: '42rem', maxWidth: 'calc(100vw - 2rem)' }">
+  <Dialog v-model:visible="visible" modal :draggable="false" :closable="!reportSubmitting && !deleting && !favoriteBusy" class="market-detail-dialog" :header="'商品详情'" :style="{ width: '42rem', maxWidth: 'calc(100vw - 2rem)' }">
     <!-- v-if="item"：没数据时内部什么都不渲染 -->
     <article v-if="item" class="market-detail">
       <!-- 详情大图：按图片原始比例缩放并居中，完整展示且不人为铺满灰色背景。 -->
-      <img v-if="activeImage && !failedImages.has(activeImage)" class="detail-image" :src="activeImage" :alt="item.title + '，第 ' + (activeImageIndex + 1) + ' 张图片'" decoding="async" @error="failedImages.add(activeImage)">
+      <img v-if="activeImage" class="detail-image" :src="activeImage" :alt="item.title + '，第 ' + (activeImageIndex + 1) + ' 张图片'" decoding="async">
       <!-- 无图占位 -->
       <div v-else class="detail-missing"><ImageOff :size="30" aria-hidden="true" /><span>暂无实拍图片</span></div>
       <div v-if="images.length > 1" class="detail-gallery" aria-label="选择商品图片">
         <Button v-for="(url, index) in images" :key="index" unstyled class="detail-thumbnail" :class="{ active: activeImageIndex === index }" :aria-label="'查看第 ' + (index + 1) + ' 张图片'" :aria-pressed="activeImageIndex === index" @click="activeImageIndex = index">
-          <img v-if="!failedImages.has(url)" :src="url" alt="" loading="lazy" decoding="async" @error="failedImages.add(url)">
-          <span v-else>{{ index + 1 }}</span>
+          <img :src="url" alt="" loading="lazy" decoding="async">
         </Button>
       </div>
       <!-- 标题行：商品右侧跟价格 -->
@@ -87,7 +127,11 @@ const visible = computed({
       <!-- 地点信息块：图钉图标 + 小标签 + 地名 -->
       <div v-if="item.place" class="detail-location"><MapPin :size="18" aria-hidden="true" /><div><small>{{ item.locationSource === 'example' ? '本地示例交接地点' : '交接地点' }}</small><p>{{ item.place }}</p></div></div>
       <Message v-if="item.isExample" severity="secondary" :closable="false" size="small">当前为本地 API 数据示例，不代表真实在售商品。</Message>
+      <Message v-if="actionIssue" severity="error" :closable="false">{{ actionIssue }}</Message>
+      <Message v-if="actionNotice" severity="success" :closable="false">{{ actionNotice }}</Message>
       <div class="detail-actions">
+        <Button v-if="isLoggedIn && !ownPost && !item.isExample" severity="secondary" outlined :loading="favoriteBusy" :disabled="!favoriteReady || favoriteBusy || deleting" :aria-pressed="favorited" @click="toggleFavorite"><component :is="favorited ? StarFill : Star" aria-hidden="true" />{{ favorited ? '取消收藏' : '收藏' }}</Button>
+        <Button v-if="canDelete" severity="danger" outlined :loading="deleting" :disabled="deleting || favoriteBusy" @click="removePost">删除帖子</Button>
         <!-- 点击向父级抛 map 事件 -->
         <Button v-if="showMap && item.position" class="ink-button" @click="emit('map', item)"><MapPin :size="16" aria-hidden="true" />在地图查看</Button>
         <Button severity="secondary" text class="detail-report-button" :aria-expanded="reportOpen" :aria-controls="reportId + '-form'" @click="reportOpen = !reportOpen"><Flag :size="16" aria-hidden="true" />举报商品</Button>

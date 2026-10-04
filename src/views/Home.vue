@@ -15,7 +15,7 @@
                                             class="account-avatar">
                                             <!-- aria-hidden：装饰图标，读屏跳过 -->
                                             <User aria-hidden="true" /></div>
-                                        <span class="font-semibold text-sm">新朋友</span>
+                                        <span class="font-semibold text-sm">{{ isLoggedIn ? (authState.user?.account || '已登录用户') : '新朋友' }}</span>
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                             </SidebarMenu>
@@ -30,7 +30,7 @@
                                             <!-- as="router-link"：把按钮渲染成路由链接（点击跳转不刷新）；
                                                  :to：目标路由（按 name 找）；:isActive：当前页高亮 -->
                                             <SidebarMenuButton as="router-link" :to="{ name: 'home-main' }"
-                                                :isActive="$route.name === 'home-main'">
+                                                :isActive="$route.name === 'home-main' && !$route.query.favorites">
                                                 <Home />
                                                 <span>市集</span>
                                             </SidebarMenuButton>
@@ -66,9 +66,19 @@
                                         </SidebarMenuItem>
                                     </SidebarMenu>
                                 </SidebarGroupContent>
+                                <SidebarGroupContent>
+                                    <SidebarMenu>
+                                        <SidebarMenuItem>
+                                            <SidebarMenuButton as="router-link" :to="{ name: 'home-main', query: { favorites: '1' } }" :isActive="$route.query.favorites === '1'">
+                                                <Star />
+                                                <span>我的收藏</span>
+                                            </SidebarMenuButton>
+                                        </SidebarMenuItem>
+                                    </SidebarMenu>
+                                </SidebarGroupContent>
                             </SidebarGroup>
 
-                            <!-- 管理员入口默认显示，后续可通过 showAdminPanel 接入权限控制。 -->
+                            <!-- 仅有效的管理员登录态显示管理入口。 -->
                             <SidebarGroup v-if="showAdminPanel">
                                 <SidebarGroupLabel>管理员面板</SidebarGroupLabel>
                                 <SidebarGroupContent>
@@ -76,14 +86,14 @@
                                         <SidebarMenuItem>
                                             <SidebarMenuButton as="router-link" :to="{ name: 'home-admin', hash: '#pending-goods' }"
                                                 :isActive="$route.name === 'home-admin' && (!$route.hash || $route.hash === '#pending-goods')">
-                                                <span class="admin-menu-marker" aria-hidden="true"></span>
+                                                <Hourglass />
                                                 <span>待审核商品</span>
                                             </SidebarMenuButton>
                                         </SidebarMenuItem>
                                         <SidebarMenuItem>
                                             <SidebarMenuButton as="router-link" :to="{ name: 'home-admin', hash: '#pending-reports' }"
                                                 :isActive="$route.name === 'home-admin' && $route.hash === '#pending-reports'">
-                                                <span class="admin-menu-marker" aria-hidden="true"></span>
+                                                <QuestionCircle />
                                                 <span>待审核举报</span>
                                             </SidebarMenuButton>
                                         </SidebarMenuItem>
@@ -96,9 +106,9 @@
                         <SidebarFooter>
                             <SidebarMenu>
                                 <SidebarMenuItem>
-                                    <SidebarMenuButton @click="loginVisible = true" aria-label="账户登录">
+                                    <SidebarMenuButton @click="isLoggedIn ? logout() : loginVisible = true" :aria-label="isLoggedIn ? '登出' : '账户登录'">
                                         <User />
-                                        <span>账户</span>
+                                        <span>{{ isLoggedIn ? '登出' : '账户' }}</span>
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                             </SidebarMenu>
@@ -117,8 +127,11 @@
                     <span class="home-title text-sm font-medium flex-1">孤独市集</span>
                     <Button class="theme-action" size="small" :aria-label="isDark ? '切换到亮色模式' : '切换到暗色模式'" @click="toggleTheme"><component :is="isDark ? Sun : Moon"/></Button>
                     <Button class="header-action" size="small" @click="openPost()"><Plus aria-hidden="true" />发布</Button>
-                    <Button severity="secondary" text size="small" @click="loginVisible = true"><Users aria-hidden="true" />登录</Button>
+                    <Button v-if="isLoggedIn" severity="secondary" text size="small" :loading="signing" :disabled="signing" @click="dailySignIn"><CalendarIcon aria-hidden="true" />签到</Button>
+                    <Button v-if="isLoggedIn" severity="secondary" text size="small" @click="logout">登出</Button>
+                    <Button v-else severity="secondary" text size="small" @click="loginVisible = true"><Users aria-hidden="true" />登录</Button>
                 </header>
+                <Message v-if="accountNotice" :severity="accountError ? 'error' : 'success'" :closable="false">{{ accountNotice }}</Message>
                 <div class="route-content flex-1 flex flex-col min-h-0">
                     <RouterView v-slot="{ Component, route }">
                         <Transition name="transition-view">
@@ -131,15 +144,17 @@
             </SidebarMain>
         </SidebarLayout>
         <!-- 两个全局弹窗：开关由 v-model:visible 双向绑定 -->
-        <LoginDialog v-model:visible="loginVisible" />
+        <LoginDialog v-model:visible="loginVisible"/>
         <PostComposer v-model:visible="postVisible" />
     </div>
 </template>
 
 <script setup>
-import { inject, onBeforeUnmount, onMounted, provide, ref } from 'vue';
+import { computed, watch, inject, onBeforeUnmount, onMounted, provide, ref } from 'vue';
 import { RouterView } from 'vue-router';
 import Button from 'primevue/button';
+import Message from 'primevue/message';
+import { authState, isLoggedIn, clearAuth, verifySession, signIn, setAuth } from '@/api/client';
 import PostComposer from '@/components/PostComposer.vue';
 import LoginDialog from '@/components/LoginDialog.vue';
 import Sidebar from 'primevue/sidebar';
@@ -179,13 +194,42 @@ import User from '@primeicons/vue/user';
 import Plus from '@primeicons/vue/plus';
 import Sun from '@primeicons/vue/sun';
 import Moon from '@primeicons/vue/moon';
+import Hourglass from '@primeicons/vue/hourglass';
+import QuestionCircle from '@primeicons/vue/question-circle';
+import Star from '@primeicons/vue/star';
+import StarFill from '@primeicons/vue/star-fill';
 
 const isMobile = ref(window.matchMedia('(max-width: 1023px)').matches);
 const loginVisible = ref(false);   // 登录弹窗
 const navOpen = ref(!isMobile.value);         // 侧栏展开？
 const postVisible = ref(false);    // 发布弹窗
-// 权限接入后可由登录态或父级配置控制；目前按需求默认显示。
-const showAdminPanel = ref(true);
+const showAdminPanel = computed(() => isLoggedIn.value && authState.user?.role === 'admin');
+const signing = ref(false), accountNotice = ref(''), accountError = ref(false);
+// 新提示重新计时；清空提示或卸载页面时取消旧计时器。
+watch(accountNotice, (message, _, onCleanup) => {
+    if (!message) return;
+    const timer = window.setTimeout(() => { accountNotice.value = ''; }, 5000);
+    onCleanup(() => window.clearTimeout(timer));
+}, { flush: 'sync' });
+function logout() { clearAuth(); postVisible.value = false; }
+watch(() => authState.token, () => { accountNotice.value = ''; });
+async function dailySignIn() {
+    if (signing.value) return;
+    const token = authState.token;
+    signing.value = true; accountNotice.value = ''; accountError.value = false;
+    try {
+        const result = await signIn();
+        if (authState.token !== token) return;
+        if (authState.user) setAuth({ token, user: { ...authState.user, level: result.level } });
+        accountNotice.value = '签到成功，获得 ' + result.exp_gain + ' 经验，连续 ' + result.streak + ' 天，当前等级 ' + result.level + '。';
+    } catch (error) { if (authState.token === token) { accountError.value = true; accountNotice.value = error.message || '签到失败，请重试。'; } }
+    finally { signing.value = false; }
+}
+async function checkSession() {
+    if (!authState.token) return;
+    try { await verifySession(); } catch (error) { accountError.value = true; accountNotice.value = error.message; }
+}
+let sessionTimer;
 const isDark = inject('isDark', ref(false));
 const toggleTheme = inject('toggleTheme', () => {});
 function openPost() {
@@ -200,6 +244,9 @@ let onMqlChange = null;
 onMounted(() => {
     if (typeof window === 'undefined') return;
 
+    void checkSession();
+    window.addEventListener('focus', checkSession);
+    sessionTimer = window.setInterval(checkSession, 60000);
     mql = window.matchMedia('(max-width: 1023px)');
     isMobile.value = mql.matches;
     navOpen.value = !isMobile.value;
@@ -211,18 +258,24 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+    clearInterval(sessionTimer);
+    window.removeEventListener('focus', checkSession);
     if (mql && onMqlChange) {
         mql.removeEventListener('change', onMqlChange);
     }
 });
+
 </script>
 
 <style scoped>
 .home-title { white-space: nowrap; min-width: max-content; }
-.admin-menu-marker { width: 7px; height: 7px; flex: none; border: 1px solid currentColor; border-radius: 50%; opacity: .7; }
 .home-header > :deep(button) { flex-shrink: 0; white-space: nowrap; }
 @media (max-width: 1023px) {
     .home-nav-aside { top: 3rem; height: calc(100% - 3rem); }
+}
+@media (max-width: 480px) {
+    .home-title { display: none; }
+    .theme-action { margin-left: auto; }
 }
 @media (max-width: 600px) {
     .home-header { gap: 6px; padding-inline: 10px; }
