@@ -178,7 +178,7 @@ onBeforeUnmount(() => {
         </label><Button severity="secondary" outlined class="map-link" aria-label="前往地图" @click="openMap()">
           <MapPin :size="16" aria-hidden="true" /><span>前往地图</span>
         </Button></div>
-      <div class="content-switch"><span class="section-label">商品列表</span><span class="total-note">{{ favoritesOnly ? '我的收藏' : '服务端推荐' }} · 共 {{ totalRecords }} 件商品</span>
+      <div class="content-switch"><span class="section-label">商品列表</span><span class="total-note">{{ favoritesOnly ? '我的收藏' : '推荐' }} · 共 {{ totalRecords }} 件商品</span>
       </div>
       <div class="feed-filters">
         <div class="category-list" aria-label="商品分类">

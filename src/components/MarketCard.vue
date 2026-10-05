@@ -3,8 +3,6 @@ import Button from 'primevue/button'
 import { ImageOff } from 'lucide-vue-next'
 import { priceLabel, type MarketItem } from '@/data/market'
 const props = defineProps<{ item: MarketItem }>()
-// defineEmits：声明本组件会"抛出"哪些事件——子组件 emit('open', item)，
-// 父组件用 @open="..." 接住并弹出详情
 const emit = defineEmits<{ open: [item: MarketItem] }>()
 console.log(JSON.stringify(props))
 </script>
@@ -26,7 +24,6 @@ console.log(JSON.stringify(props))
       <h2>{{ item.title }}</h2>
       <!-- 商品卡显示价格。 -->
       <p class="card-price">{{ priceLabel(item.price) }}</p>
-      <!-- 末行元信息：作者 · 类别/地点；aria-hidden 的 · 纯装饰，读屏不念 -->
       <p class="card-meta">{{ item.author }}<span aria-hidden="true"> · </span>{{ item.category }}</p>
     </div>
   </Button>

@@ -209,3 +209,148 @@ export function getFavorites() { return request<GoodsList<string[]>[]>('/api/pos
 export function setFavorite(id: string | number, favorite: boolean) {
   return request<string>('/api/posts/' + encodeURIComponent(id) + '/favorite', { method: favorite ? 'POST' : 'DELETE' })
 }
+
+export interface AgentSession {
+  id: number
+  title: string
+  status: string
+  msg_count: number
+  last_msg_at: string
+  created_at: string
+}
+
+export interface AgentMessage {
+  id: number
+  session_id: number
+  role: string
+  content: string
+  status: string
+  client_msg_id?: string
+  created_at: string
+}
+
+export interface AgentTrace {
+  name: string
+  ok: boolean
+  cost_ms: number
+  err_msg: string
+}
+
+export interface AgentChatRequest {
+  session_id: number
+  message: string
+  client_msg_id: string
+}
+
+export type AgentStreamEvent =
+  | { type: 'start'; session_id: number }
+  | { type: 'delta'; text: string }
+  | { type: 'done'; session_id: number; trace: AgentTrace[] }
+
+export function getAgentSessions() {
+  return request<AgentSession[]>('/api/agent/sessions')
+}
+
+export function createAgentSession(title = '') {
+  return request<AgentSession>('/api/agent/sessions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }),
+  })
+}
+
+export function getAgentMessages(id: number) {
+  return request<AgentMessage[]>('/api/agent/sessions/' + encodeURIComponent(id) + '/messages')
+}
+
+export function archiveAgentSession(id: number) {
+  return request<void>('/api/agent/sessions/' + encodeURIComponent(id), { method: 'DELETE' })
+}
+
+/** POST SSE 使用现有服务地址及登录态；不能用只支持 GET 的 EventSource。 */
+export async function streamAgentChat(
+  payload: AgentChatRequest,
+  onEvent: (event: AgentStreamEvent) => void,
+  signal: AbortSignal,
+) {
+  const sessionToken = authState.token
+  const response = await fetch(API_BASE_URL + '/api/agent/chat/stream', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      Authorization: 'Bearer ' + sessionToken,
+    },
+    body: JSON.stringify(payload),
+    signal,
+  })
+  // 参数错误可能仍以 HTTP 200 + JSON code 返回，不能当作空的成功事件流。
+  if (!response.ok || !response.headers.get('Content-Type')?.toLowerCase().includes('text/event-stream')) {
+    let body: { code?: number; msg?: string; error?: string } | null = null
+    try { body = await response.json() } catch { /* 网关错误不一定有 JSON 正文 */ }
+    if ((response.status === 401 || body?.code === 401) && authState.token === sessionToken) clearAuth()
+    throw new ApiError(body?.msg || body?.error || '未收到流式响应，请稍后重试', response.status, body?.code)
+  }
+  if (!response.body) throw new ApiError('当前浏览器不支持读取流式响应', 0)
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let completed = false
+
+  function dispatch(frame: string) {
+    let event = ''
+    const data: string[] = []
+    for (const line of frame.split(/\r\n|\r|\n/)) {
+      if (line.startsWith(':')) continue
+      const separator = line.indexOf(':')
+      const field = separator < 0 ? line : line.slice(0, separator)
+      const value = separator < 0 ? '' : line.slice(separator + 1).replace(/^ /, '')
+      if (field === 'event') event = value
+      if (field === 'data') data.push(value)
+    }
+    if (!data.length || !['start', 'delta', 'done', 'error'].includes(event)) return
+    let value: any
+    try { value = JSON.parse(data.join('\n')) } catch { throw new ApiError('助手返回的流式数据格式错误', 0) }
+    if (!value || typeof value !== 'object') throw new ApiError('助手返回的事件数据无效', 0)
+    if (event === 'error') throw new ApiError(typeof value.message === 'string' ? value.message : '助手暂时无法回答，请稍后再试', 0)
+    if (event === 'delta') {
+      if (typeof value.text !== 'string') throw new ApiError('助手返回的正文片段无效', 0)
+      onEvent({ type: 'delta', text: value.text })
+      return
+    }
+    if (!Number.isSafeInteger(value.session_id) || value.session_id < (event === 'done' ? 1 : 0)) {
+      throw new ApiError('助手返回的会话编号无效', 0)
+    }
+    if (event === 'start') onEvent({ type: 'start', session_id: value.session_id })
+    if (event === 'done') {
+      const trace = Array.isArray(value.trace) ? value.trace.filter((item: any) =>
+        item && typeof item.name === 'string' && typeof item.ok === 'boolean' &&
+        typeof item.cost_ms === 'number' && Number.isFinite(item.cost_ms),
+      ).map((item: any) => ({ ...item, err_msg: typeof item.err_msg === 'string' ? item.err_msg : '' })) : []
+      onEvent({ type: 'done', session_id: value.session_id, trace })
+      completed = true
+    }
+  }
+
+  try {
+    while (!completed) {
+      const { done, value } = await reader.read()
+      // 网络分块可能截断 UTF-8 中文或事件行，必须跨块保留解码状态与未完成帧。
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true })
+      let boundary: RegExpExecArray | null
+      while ((boundary = /\r\n\r\n|\n\n|\r\r/.exec(buffer))) {
+        const frame = buffer.slice(0, boundary.index)
+        buffer = buffer.slice(boundary.index + boundary[0].length)
+        dispatch(frame)
+        if (completed) break
+      }
+      if (buffer.length > 1024 * 1024) throw new ApiError('流式事件过大，已停止接收', 0)
+      if (done) {
+        if (!completed && buffer.trim()) dispatch(buffer)
+        break
+      }
+    }
+    if (!completed) throw new ApiError('连接已中断，回答可能不完整，请刷新历史确认', 0)
+  } finally {
+    try { await reader.cancel() } catch { /* 中止后的连接可能已经关闭 */ }
+    reader.releaseLock()
+  }
+}

@@ -232,7 +232,7 @@ onBeforeUnmount(() => { disposed = true; window.removeEventListener('market:good
         <label class="map-search"><Search :size="17" aria-hidden="true" /><InputText v-model="query" aria-label="搜索附近商品" placeholder="搜索想找的商品" fluid /></label>
         <!-- 分类下拉 + 距离下拉（没定位过时禁用） -->
         <div class="map-filters"><Select v-model="category" :options="categories" aria-label="商品分类" size="small" /><Select v-model="radius" :options="radiusOptions" optionLabel="label" optionValue="value" aria-label="距离范围，需要先定位" size="small" :disabled="!userPosition" /></div>
-        <div class="list-heading"><span>{{ visibleItems.length }} 件{{ groupIds.length ? '同组' : '' }}商品</span><Button v-if="groupIds.length || searchBounds" label="清除范围" text size="small" severity="secondary" @click="groupIds = []; searchBounds = null" /><small v-else>服务端推荐</small></div>
+        <div class="list-heading"><span>{{ visibleItems.length }} 件{{ groupIds.length ? '同组' : '' }}商品</span><Button v-if="groupIds.length || searchBounds" label="清除范围" text size="small" severity="secondary" @click="groupIds = []; searchBounds = null" /><small v-else>推荐</small></div>
         <!-- 商品列表：data-id 是自定义属性（data-* 合法），脚本用它定位行 -->
         <div ref="listEl" class="item-list">
           <article v-for="item in visibleItems" :key="item.id" :data-id="item.id" class="result-item" :class="{ active: selectedId === item.id }">

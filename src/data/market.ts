@@ -67,7 +67,6 @@ const exampleGoods = new WeakSet<GoodsList<unknown>>(goodsItems)
 
 type ExamplePresentation = Pick<MarketItem, 'place' | 'position' | 'ratio' | 'imagePosition'>
 
-// API 商品没有地点字段。这里只关联本地示例对象，不能凭相同商品 ID 为真实响应补造位置。
 const examplePresentations = new WeakMap<GoodsList<unknown>, ExamplePresentation>([
   [goodsItems[0]!, { place: '图书馆附近', position: [120.1672, 30.2941], ratio: '4 / 5', imagePosition: '50% 45%' }],
   [goodsItems[1]!, { place: '教学楼附近', position: [120.1638, 30.2917], ratio: '1 / 1', imagePosition: '50% 0%' }],

@@ -15,7 +15,7 @@
                                             class="account-avatar">
                                             <!-- aria-hidden：装饰图标，读屏跳过 -->
                                             <User aria-hidden="true" /></div>
-                                        <span class="font-semibold text-sm">{{ isLoggedIn ? (authState.user?.account || '已登录用户') : '新朋友' }}</span>
+                                        <span class="font-semibold text-sm">{{ isLoggedIn ? (authState.user?.account || '老朋友') : '新朋友' }}</span>
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                             </SidebarMenu>

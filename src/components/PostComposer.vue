@@ -39,24 +39,18 @@ function validateImage(url: string): Promise<void> {
     const timer = setTimeout(() => finish(false), 8000)
     // finish 统一收尾：清计时器、摘监听、按结果 resolve/reject
     function finish(valid: boolean) { clearTimeout(timer); image.onload = null; image.onerror = null; valid ? resolve() : reject(new Error('图片无法读取')) }
-    // naturalWidth/Height：图片真实尺寸——能解码出来且 >0 才算有效图
     image.onload = () => finish(image.naturalWidth > 0 && image.naturalHeight > 0)
     image.onerror = () => finish(false)
     image.src = url   // 设置 src 才开始加载
   })
 }
-// FileUpload 的 uploader 事件：把选中的文件逐张校验后收进草稿。
-// 会跳过：格式不对（仅 JPEG/PNG/WebP）、超过 10MB、凑满 9 张、和已有照片同名同大小同修改时间（视为重复）。
 async function addPhotos(event: { files: File | File[] }) {
   const target = draft   // 先固定当前草稿，循环中途切类型也不写错对象
-  // 三元判断：传来的是数组就拷贝一份，不是就包成单元素数组
   const incoming = Array.isArray(event.files) ? [...event.files] : [event.files]
   processing.value = true; photoNote.value = ''
   let skipped = 0   // 计数被跳过的图片
   try {
-    // for...of：逐个处理（每张要 await，必须串行）
     for (const file of incoming) {
-      // PrimeVue 会为已选择图片创建对象 URL；这里单独管理草稿的生命周期。
       const temporary = (file as File & { objectURL?: string }).objectURL
       if (temporary) URL.revokeObjectURL(temporary)   // 先释放 PrimeVue 建的链接，统一自己管
       if (disposed) break
@@ -83,7 +77,6 @@ function previewPost() {
   publishError.value = ''
   publishResult.value = null
   const value = draft
-  // else if 链：一次只报第一个问题
   if (!value.photos.length) issue.value = '请至少添加一张照片用于本地预览。'
   else if (!value.title.trim()) issue.value = '请填写商品标题。'
   else if (value.title.length > 100) issue.value = '商品标题最多 100 个字符。'
@@ -92,7 +85,6 @@ function previewPost() {
   // 排除 NaN/Infinity；价格必须严格大于 0。
   else if (value.price === null || !Number.isFinite(value.price) || value.price <= 0) issue.value = '商品价格必须大于 0。'
   if (issue.value) return
-  // 可选字段留空时省略；本地扩展信息单独保存，不拼入 description。
   preview.value = {
     goods: {
       title: value.title.trim(),
@@ -157,15 +149,13 @@ watch(() => props.visible, visible => { if (!visible) { pickerVisible.value = fa
         <div class="editor-field"><span class="field-label">交易地点（本地选填）</span><Button unstyled class="location-field" @click="pickerVisible = true"><MapPin :size="20" aria-hidden="true" /><span><strong>{{ draft.place?.name || '添加公共交接地点' }}</strong><small>{{ draft.place?.address || '高德搜索与地图选点，仅保存到本地草稿' }}</small></span><ChevronRight :size="18" aria-hidden="true" /></Button></div>
       </div>
       <Message v-if="issue" severity="error" :closable="false" size="small">{{ issue }}</Message>
-      <Message severity="secondary" :closable="false" size="small">发布时会先上传图片，再提交商品。交易地点不属于商品接口字段，仅保留在本地草稿中。</Message>
+      <Message severity="secondary" :closable="false" size="small">发布时会先上传图片，再提交商品。</Message>
     </form>
     <template #footer><div class="composer-footer"><Button severity="secondary" text :disabled="processing || publishing" @click="clearVisible = true"><Trash2 :size="16" aria-hidden="true" /><span>清空当前草稿</span></Button><div><Button label="保留并关闭" severity="secondary" text :disabled="publishing" @click="shown = false" /><Button type="submit" form="post-editor" class="ink-button" :disabled="processing || publishing"><Eye :size="16" aria-hidden="true" />预览商品</Button></div></div></template>
   </Dialog>
-  <!-- 地点选择弹窗：@select 的 $event 是 emit 抛出的地点对象，直接写进草稿 -->
   <PlacePicker v-model:visible="pickerVisible" :value="draft.place" @select="draft.place = $event" />
   <!-- 预览弹窗：只读展示快照，不发布 -->
   <Dialog v-model:visible="previewVisible" modal :draggable="false" :closable="!publishing" :header="publishResult ? '商品已提交' : '商品预览'" :style="{ width: '38rem', maxWidth: 'calc(100vw - 2rem)' }"><article v-if="preview" class="post-preview"><div class="preview-photos"><img v-for="photo in preview.local.photos" :key="photo.id" :src="photo.url" alt="商品照片预览"></div><small>{{ preview.goods.category || '商品' }}</small><h2>{{ preview.goods.title }}</h2><strong class="preview-price">{{ '¥' + preview.goods.price }}</strong><p v-if="preview.goods.description">{{ preview.goods.description }}</p><div v-if="preview.local.place" class="preview-place"><MapPin :size="17" aria-hidden="true" /><span>{{ preview.local.place.name }}（本地信息）</span></div><Message v-if="publishResult" severity="success" :closable="false" size="small">{{ publishResult.msg || '商品已由服务端接收。' }} 当前审核状态：{{ publishResult.status }}。</Message><Message v-else severity="secondary" :closable="false" size="small">确认发布后，图片会先上传到服务端；交易地点不属于商品接口字段。</Message><Message v-if="publishError" severity="error" :closable="false" size="small">{{ publishError }}</Message></article><template #footer><div class="composer-footer"><span></span><div><Button :label="publishResult ? '完成' : '返回编辑'" severity="secondary" text :disabled="publishing" @click="previewVisible = false" /><Button v-if="!publishResult" class="ink-button" :loading="publishing" :disabled="processing" @click="publishPost"><ImagePlus :size="16" aria-hidden="true" />上传图片并发布</Button></div></div></template></Dialog>
-  <!-- 清空确认弹窗：severity="danger" 红色危险按钮 -->
   <Dialog v-model:visible="clearVisible" modal header="清空当前草稿？" :draggable="false" :style="{ width: '24rem', maxWidth: 'calc(100vw - 2rem)' }"><p>将移除当前商品草稿的文字、照片和地点。</p><template #footer><Button label="保留草稿" severity="secondary" text @click="clearVisible = false" /><Button label="确认清空" severity="danger" @click="clearDraft" /></template></Dialog>
 </template>
 <style scoped>
