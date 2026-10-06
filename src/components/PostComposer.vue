@@ -124,12 +124,14 @@ async function publishPost() {
       if (photo.file) imageUrls.push((await uploadGoodsImage(photo.file)).url)
       else imageUrls.push(photo.url)
     }
-    const result = props.item
-      ? await updateGoods(props.item.id, { ...preview.value.goods, images: imageUrls })
-      : await createGoods({ ...preview.value.goods, images: imageUrls })
-    publishResult.value = {
-      msg: props.item ? '商品已更新' : result.msg,
-      status: props.item ? result.status : result.goods?.status || 'pending',
+    // 两个接口返回的结构不一样，分开写才能各自拿到自己的字段（合成一个三元表达式会变成联合类型，两边字段都取不到）
+    const payload = { ...preview.value.goods, images: imageUrls }
+    if (props.item) {
+      const updated = await updateGoods(props.item.id, payload)   // 返回 GoodsList：有 status，没有 msg
+      publishResult.value = { msg: '商品已更新', status: updated.status }
+    } else {
+      const created = await createGoods(payload)   // 返回 GoodsPost：有 msg，商品对象在 goods 里
+      publishResult.value = { msg: created.msg, status: created.goods?.status || 'pending' }
     }
     window.dispatchEvent(new Event('market:goods-updated'))
     emit('saved')

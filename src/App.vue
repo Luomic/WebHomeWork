@@ -1,45 +1,22 @@
 <script setup lang="ts">
-// script setup：Vue 3 的语法糖——这里声明的变量/函数在 <template> 里直接可用，不用 return
-// lang="ts"：使用 TypeScript
-// 从 vue 导入需要的 API：
-//   onBeforeUnmount：组件卸载前触发的生命周期钩子（这里用来清理事件监听）
-//   provide：向所有后代组件"提供"一个值（后代用 inject 取，不用一层层传 props）
-//   ref：创建响应式数据（值变了页面自动跟着变；脚本里读写要 .value）
-//   watch：监听某个响应式数据，变化时执行回调
 import { onBeforeUnmount, provide, ref, watch } from 'vue'
 // RouterView：路由出口组件，URL 匹配到的页面组件会渲染在它这个位置
 import { RouterView } from 'vue-router'
 
-// `.to-dark` 挂在 <html> 上而不是应用根节点：PrimeVue 会把 Dialog 等浮层传送到 body，
-// 只有放在 html 上，这些浮层才能同时拿到 PrimeVue 暗色色板和下方的 --app-* 变量。
-// 初始值由 index.html 中的内联脚本在首帧前写入，这里直接读取即可。
-// documentElement 就是 <html> 根元素（比 document.body 更外层）
 const root = document.documentElement
-// ref(...)：包一层让它变成响应式；初始值 = 首帧前 index.html 脚本有没有给 html 加 to-dark
 const isDark = ref(root.classList.contains('to-dark'))
-// watch(要监听的数据, 回调)：isDark 一变，就同步给 <html> 加/减 to-dark 类
-// 脚本里改 ref 必须写 .value；模板里不用——新手最容易错的就是这里
 watch(isDark, value => root.classList.toggle('to-dark', value))
-
-// 只有手动切换才写入 localStorage；未写入时持续跟随系统主题变化。
-// matchMedia：向浏览器查询媒体查询结果，这里查询"系统是否为暗色模式"
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)')
-// 系统主题切换时触发：只有用户从没手动选过主题（localStorage 里没存），才跟随系统
 function followSystem(event: MediaQueryListEvent) {
   let saved = null
-  // try/catch：隐私模式下读 localStorage 可能抛异常，吞掉
   try { saved = localStorage.getItem('jh-theme') } catch {}
   // event.matches：新的系统主题是否为暗色
   if (!saved) isDark.value = event.matches
 }
-// addEventListener 的第二个参数是回调函数；系统主题一变就调用 followSystem
 systemDark.addEventListener('change', followSystem)
-// 组件卸载前把监听器摘掉，防止重复注册（虽然 App 基本不会卸载，写上是好习惯）
 onBeforeUnmount(() => systemDark.removeEventListener('change', followSystem))
 
-// 向所有后代组件提供 isDark（后代 inject('isDark') 拿到的是同一个 ref）
 provide('isDark', isDark)
-// 提供切换主题的函数：取反 → 存进 localStorage（下次刷新以它为准）
 provide('toggleTheme', () => {
   isDark.value = !isDark.value
   try { localStorage.setItem('jh-theme', isDark.value ? 'dark' : 'light') } catch {}
@@ -47,7 +24,6 @@ provide('toggleTheme', () => {
 </script>
 
 <template>
-  <!-- class="app-shell"：应用外壳，配套样式在下面 <style> 里（铺背景色、占满视口高） -->
   <div class="app-shell">
     <RouterView v-slot="{ Component, route }">
       <Transition :name="String(route.meta.transition ?? 'page')">
@@ -59,14 +35,7 @@ provide('toggleTheme', () => {
   </div>
 </template>
 
-<!-- 注意：这里没有 scoped——下面的样式是全局的，因为要覆盖 PrimeVue
-     传送到 body 的浮层（Dialog 等），scoped 样式够不到它们 -->
 <style>
-/* 全站颜色统一走这组变量，页面样式不再写死黑白色值，暗色只需在这里改一处。
- * --app-field：输入框、卡片、气泡等"纸面"；--app-muted / --app-faint：次要 / 更弱的文字；
- * --app-line：页面内分隔线；--app-hover：悬停与选中底色；--app-map-*：无地图 Key 时的校区示意图。
- * 需要反色强调（选中按钮、我方气泡）时直接用 --app-text 作底、--app-bg 作字。 */
-/* :root = <html> 根元素；这里定义的变量全站可用（var(--app-xxx) 引用） */
 :root {
   /* color-scheme：告诉浏览器当前是亮色，让滚动条/表单控件按亮色渲染 */
   color-scheme: light;

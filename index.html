@@ -1,44 +1,21 @@
 <!DOCTYPE html>
-<!-- 声明这是 HTML5 文档；没有这行浏览器会用旧的"怪异模式"解析页面，布局会出错 -->
-<!-- lang="zh-CN"：告诉浏览器和搜索引擎这个页面的主要语言是简体中文（影响翻译提示、读屏发音） -->
 <html lang="zh-CN">
-  <!-- <head> 里放的是"给浏览器看的信息"，不会显示在页面上 -->
   <head>
-    <!-- charset="UTF-8"：指定文件编码为 UTF-8，中文才不会乱码；必须放在 head 最前面 -->
     <meta charset="UTF-8">
-    <!-- rel="icon"：定义网站的图标（浏览器标签页上那个小图）；href 指向 public/ 目录下的 icon.png（/ 代表项目根） -->
     <link rel="icon" href="/icon.png">
-    <!-- name="viewport"：移动端适配的关键设置。
-         width=device-width → 页面宽度等于设备屏幕宽度；
-         initial-scale=1.0 → 初始不缩放。没有这行，手机上页面会被缩小显示 -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- 浏览器标签页上显示的标题文字 -->
     <title>孤独市集</title>
-    <!-- 这段内联脚本没有 src，代码直接写在标签里；它必须在 Vue 加载前执行，所以放在 head -->
     <script>
-      // 在 Vue 挂载前确定主题：避免暗色用户刷新时先闪一下亮色背景（"闪白"问题）。
-      // 用户手动切换过则以 localStorage 为准，否则跟随系统设置。
-      // 立即执行函数 (function(){...})()：定义完马上运行，不污染全局变量。
       (function () {
         var theme = null
-        // try/catch：如果浏览器关闭了 localStorage（如隐私模式），读取会抛错，这里吞掉异常不让页面崩
         try { theme = localStorage.getItem('jh-theme') } catch (e) {}
-        // matchMedia('(prefers-color-scheme: dark)')：查询系统是否设置了深色模式；.matches 为 true 表示是暗色
         var dark = theme ? theme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches
-        // 给 <html> 根元素加减 to-dark 类：PrimeVue 的暗色变量和 Tailwind 的 dark: 变体都认这个类
-        // toggle('to-dark', dark)：dark 为 true 加上类，为 false 移除类
         document.documentElement.classList.toggle('to-dark', dark)
       })()
     </script>
   </head>
-  <!-- <body> 里放的是"给用户看的内容" -->
   <body>
-    <!-- Vue 应用的挂载点：main.ts 里 createDocument('#app') 会把整个应用渲染进这个 div，
-         之后这个 div 里的一切都由 Vue 接管 -->
     <div id="app"></div>
-    <!-- type="module"：以 ES Module 方式加载脚本（支持 import/export）；
-         src="/src/main.ts"：入口文件。开发时 Vite 会即时编译 TS；
-         打包构建时这个标签会被替换成指向 dist/ 里压缩后 js 的链接 -->
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
