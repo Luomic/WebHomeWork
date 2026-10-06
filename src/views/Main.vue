@@ -11,12 +11,13 @@ import MarketCard from '@/components/MarketCard.vue'
 import MarketDetail from '@/components/MarketDetail.vue'
 import { toMarketItem, categories, browseState } from '@/data/market'
 import { getRankedGoods, resolveAssetUrl, getFavorites, authState, isLoggedIn } from '@/api/client'
+import PostComposer from '@/components/PostComposer.vue'
 
 const router = useRouter()
 const route = useRoute()
 const favoritesOnly = computed(() => route.query.favorites === '1')
 let loadVersion = 0
-const pageEl = ref(null), gridEl = ref(null), selected = ref(null)
+const pageEl = ref(null), gridEl = ref(null), selected = ref(null), editing = ref(null), composerVisible = ref(false)
 const goodsItems = ref([])
 const feedLoading = ref(false), feedError = ref('')
 const PAGE_SIZE = 20
@@ -73,9 +74,11 @@ async function loadGoods() {
     if (favoritesOnly.value && !isLoggedIn.value) {
       goodsItems.value = []; feedError.value = '请先登录后查看收藏。'; return
     }
-    const goods = await (favoritesOnly.value ? getFavorites() : getRankedGoods())
+    const goods = favoritesOnly.value
+      ? await getFavorites()
+      : await loadAllRankedGoods()
     if (version !== loadVersion) return
-    goodsItems.value = goods.map(item => ({
+    goodsItems.value = (Array.isArray(goods) ? goods : []).map(item => ({
       ...item,
       images: Array.isArray(item.images) ? item.images.map(resolveAssetUrl) : [],
     }))
@@ -86,6 +89,15 @@ async function loadGoods() {
   } finally {
     if (version === loadVersion) feedLoading.value = false
   }
+}
+async function loadAllRankedGoods() {
+  const firstPage = await getRankedGoods(1)
+  const all = [...(firstPage.goods ?? [])]
+  for (let page = 2; page <= firstPage.totalpage; page++) {
+    const result = await getRankedGoods(page)
+    all.push(...(result.goods ?? []))
+  }
+  return all
 }
 let observer, frame
 function disconnectGridObserver() {
@@ -218,7 +230,8 @@ onBeforeUnmount(() => {
           :pageLinkSize="3" template="PrevPageLink PageLinks NextPageLink" @page="onPage" />
       </footer>
     </div>
-    <MarketDetail :item="selected" @close="selected = null" @map="openMap" />
+    <MarketDetail :item="selected" @close="selected = null" @map="openMap" @edit="editing = $event; selected = null; composerVisible = true" />
+    <PostComposer v-model:visible="composerVisible" :item="editing" @saved="editing = null" />
   </main>
 </template>
 <style scoped>

@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import LoginDialog from '@/components/LoginDialog.vue'
+import { renderMarkdown } from '@/utils/markdown'
 import {
   archiveAgentSession,
   authState,
@@ -30,6 +31,7 @@ import {
 } from '@/api/client'
 
 const input = ref('')
+const markdown = (value) => renderMarkdown(value)
 const inputEl = ref(null)
 const chatEl = ref(null)
 const loginVisible = ref(false)
@@ -527,7 +529,7 @@ onBeforeUnmount(() => {
         /></Button>
         <div class="chat-heading">
           <strong>{{ sessionTitle }}</strong
-          ><small>JhFair · 市集助手</small>
+          ><small>与 JhFair 一起，探索孤独市集</small>
         </div>
         <Button
           v-if="selectedSession"
@@ -562,7 +564,7 @@ onBeforeUnmount(() => {
           <div class="agent-mark" aria-hidden="true"><Sparkles :size="25" /></div>
           <h2>让闲置，遇见刚刚好。</h2>
           <p class="agent-intro">
-            找点好物，整理闲置。<br />也可以问问你的等级、经验与连续签到天数。
+            找点好物，整理闲置。
           </p>
           <div class="suggestions">
             <button
@@ -578,7 +580,7 @@ onBeforeUnmount(() => {
               ><small>{{ suggestion.description }}</small>
             </button>
           </div>
-          <p class="scope-note">助手提供查询和建议，不会替你发布、删除或签到。</p>
+          <p class="scope-note">助手提供查询和建议。</p>
           <Button v-if="!isLoggedIn" class="new-session" unstyled @click="loginVisible = true">登录后开始聊天</Button>
         </div>
         <ol v-else class="message-list" aria-label="会话消息">
@@ -590,8 +592,7 @@ onBeforeUnmount(() => {
               <small v-if="message.status === 'unconfirmed'">保存状态待核对</small>
             </div>
             <div class="message-bubble">
-              <!-- 以文本呈现模型输出，不执行其中的 HTML、脚本或指令。 -->
-              <p v-if="message.content" class="message-content">{{ message.content }}</p>
+              <div v-if="message.content" class="message-content" v-html="markdown(message.content)"></div>
               <p v-else-if="message.status === 'streaming'" class="thinking">正在思考，可能需要查询市集信息…</p>
               <p v-else class="thinking">
                 {{ message.status === 'done' ? '暂未取到回答正文，请核对历史。' : '本次未收到完整回答。' }}
@@ -995,12 +996,17 @@ onBeforeUnmount(() => {
   background: var(--app-surface);
 }
 .message-content {
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 14px;
   line-height: 1.9;
   margin: 0;
 }
+.message-content :deep(p) { margin: 0 0 8px; }
+.message-content :deep(p:last-child) { margin-bottom: 0; }
+.message-content :deep(h1), .message-content :deep(h2), .message-content :deep(h3) { margin: 8px 0 5px; font-size: 1em; font-weight: 650; }
+.message-content :deep(ul) { margin: 4px 0 8px; padding-left: 20px; }
+.message-content :deep(code) { padding: 1px 4px; border-radius: 4px; background: var(--app-hover); font-size: .92em; }
+.message-content :deep(a) { color: inherit; text-decoration: underline; }
 .thinking,
 .stream-indicator {
   color: var(--app-muted);

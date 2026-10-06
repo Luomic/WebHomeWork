@@ -30,6 +30,7 @@ export interface MarketItem {
   locationSource?: 'example'
   isExample: boolean
   description: string
+  saleClosed: boolean
 }
 
 export const campus: [number, number] = [120.165741, 30.293231]
@@ -81,6 +82,7 @@ const examplePresentations = new WeakMap<GoodsList<unknown>, ExamplePresentation
 export function toMarketItem(goods: GoodsList<unknown>): MarketItem {
   const source = toRaw(goods)
   const presentation = examplePresentations.get(source)
+  const embedded = parseEmbeddedPosition(goods.description)
   const images = Array.isArray(goods.images) ? goods.images.filter((image): image is string => typeof image === 'string' && !!image.trim()) : []
   return {
     id: String(goods.id),
@@ -96,11 +98,22 @@ export function toMarketItem(goods: GoodsList<unknown>): MarketItem {
     createdAt: goods.created_at,
     status: goods.status,
     place: presentation?.place,
-    position: presentation?.position,
-    locationSource: presentation?.position ? 'example' : undefined,
+    position: embedded?.position ?? presentation?.position,
+    locationSource: embedded ? undefined : presentation?.position ? 'example' : undefined,
     isExample: exampleGoods.has(source),
-    description: goods.description || '暂无详细描述。',
+    description: embedded?.description || '暂无详细描述。',
+    saleClosed: goods.sale_closed === true,
   }
+}
+
+/** 从描述末尾读取前端写入的坐标片段，并保证正文展示时不包含该实现细节。 */
+export function parseEmbeddedPosition(description?: string) {
+  if (typeof description !== 'string') return null
+  const match = description.match(/(?:\r?\n|^)\s*\{"position":\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]}\s*$/)
+  if (!match) return { description }
+  const position: [number, number] = [Number(match[1]), Number(match[2])]
+  if (!position.every(Number.isFinite)) return { description }
+  return { position, description: description.slice(0, match.index).trimEnd() }
 }
 
 // 商品列表页与地图页共享同一份适配结果，避免各自维护数据。

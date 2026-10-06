@@ -13,12 +13,13 @@ import { ImagePlus, MapPin, ChevronRight, ChevronLeft, X, Eye, Trash2 } from 'lu
 import PlacePicker from './PlacePicker.vue'
 import { categories, type PlaceValue } from '@/data/market'
 import type { GoodsRequest } from '@/types/goods/Goods'
-import { createGoods, uploadGoodsImage } from '@/api/client'
-interface LocalPhoto { id: string; file: File; url: string }
+import { createGoods, updateGoods, uploadGoodsImage } from '@/api/client'
+import type { MarketItem } from '@/data/market'
+interface LocalPhoto { id: string; file?: File; url: string }
 // 属于最初没有与后端联调的圣遗物
 interface Draft { title: string; content: string; price: number | null; category: string | null; place: PlaceValue | null; photos: LocalPhoto[] }
-const props = defineProps<{ visible: boolean }>()
-const emit = defineEmits<{ 'update:visible': [value: boolean] }>()
+const props = withDefaults(defineProps<{ visible: boolean; item?: MarketItem | null }>(), { item: null })
+const emit = defineEmits<{ 'update:visible': [value: boolean]; saved: [] }>()
 const shown = computed({ get: () => props.visible, set: value => emit('update:visible', value) })
 const fresh = (): Draft => ({ title: '', content: '', price: null, category: '', place: null, photos: [] })
 const draft = reactive<Draft>(fresh())
@@ -31,7 +32,7 @@ const preview = ref<{
 } | null>(null)
 let disposed = false   // 组件是否已卸载：卸载后异步回调不再动数据
 // blob 链接用完必须手动释放，否则文件会一直占着内存直到刷新页面。
-function revoke(photos: LocalPhoto[]) { photos.forEach(photo => URL.revokeObjectURL(photo.url)) }
+function revoke(photos: LocalPhoto[]) { photos.filter(photo => photo.file).forEach(photo => URL.revokeObjectURL(photo.url)) }
 // 用 <img> 真正解码一次，挡掉"改了扩展名的假图片"和截断文件；8 秒解码不出来按失败处理。
 function validateImage(url: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -55,7 +56,7 @@ async function addPhotos(event: { files: File | File[] }) {
       if (temporary) URL.revokeObjectURL(temporary)   // 先释放 PrimeVue 建的链接，统一自己管
       if (disposed) break
       // 超长条件：格式不在白名单 || 超过 10MB（10*1024*1024 字节）|| 已满 9 张 || 重复文件
-      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 10 * 1024 * 1024 || target.photos.length >= 9 || target.photos.some(photo => photo.file.name === file.name && photo.file.size === file.size && photo.file.lastModified === file.lastModified)) { skipped++; continue }
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 10 * 1024 * 1024 || target.photos.length >= 9 || target.photos.some(photo => photo.file && photo.file.name === file.name && photo.file.size === file.size && photo.file.lastModified === file.lastModified)) { skipped++; continue }
       const url = URL.createObjectURL(file)
       try {
         await validateImage(url)   // 真解码验证
@@ -70,6 +71,15 @@ async function addPhotos(event: { files: File | File[] }) {
 function removePhoto(index: number) { const photo = draft.photos[index]; if (!photo) return; URL.revokeObjectURL(photo.url); draft.photos.splice(index, 1) }
 function movePhoto(index: number, offset: number) { const photos = draft.photos; const to = index + offset; if (to < 0 || to >= photos.length) return; const [photo] = photos.splice(index, 1); if (photo) photos.splice(to, 0, photo) }
 function clearDraft() { revoke(draft.photos); Object.assign(draft, fresh()); clearVisible.value = false; issue.value = ''; photoNote.value = ''; preview.value = null }
+function loadItem(item: MarketItem | null) {
+  revoke(draft.photos)
+  Object.assign(draft, item ? {
+    title: item.title, content: item.description === '暂无详细描述。' ? '' : item.description,
+    price: item.price, category: item.category, place: item.position ? { name: item.place || '已保存地点', address: '', position: [...item.position], source: 'map' as const } : null,
+    photos: item.images.map((url, index) => ({ id: `existing-${item.id}-${index}`, url })),
+  } : fresh())
+  issue.value = ''; photoNote.value = ''; preview.value = null; publishResult.value = null
+}
 // 按接口字段校验文字；照片至少一张是当前本地预览的要求。
 // 全部通过才把草稿快照进 preview，打开预览弹窗。
 function previewPost() {
@@ -89,7 +99,7 @@ function previewPost() {
     goods: {
       title: value.title.trim(),
       price: value.price!,
-      ...(value.content.trim() ? { description: value.content.trim() } : {}),
+      ...(value.content.trim() || value.place || props.item ? { description: withPosition(value.content.trim(), value.place) } : {}),
       ...(value.category?.trim() ? { category: value.category.trim() } : {}),
     },
     local: {
@@ -99,6 +109,10 @@ function previewPost() {
   }
   previewVisible.value = true
 }
+function withPosition(content: string, place: PlaceValue | null) {
+  if (!place) return content
+  return `${content.trim()}\n{"position":[${place.position[0]},${place.position[1]}]}`.trim()
+}
 // 先上传全部图片，只有每张图片都成功后才创建商品，避免提交 blob 地址给服务端。
 async function publishPost() {
   if (!preview.value || publishing.value || publishResult.value) return
@@ -107,15 +121,18 @@ async function publishPost() {
   try {
     const imageUrls: string[] = []
     for (const photo of draft.photos) {
-      const uploaded = await uploadGoodsImage(photo.file)
-      imageUrls.push(uploaded.url)
+      if (photo.file) imageUrls.push((await uploadGoodsImage(photo.file)).url)
+      else imageUrls.push(photo.url)
     }
-    const result = await createGoods({ ...preview.value.goods, images: imageUrls })
+    const result = props.item
+      ? await updateGoods(props.item.id, { ...preview.value.goods, images: imageUrls })
+      : await createGoods({ ...preview.value.goods, images: imageUrls })
     publishResult.value = {
-      msg: result.msg,
-      status: result.goods?.status || 'pending',
+      msg: props.item ? '商品已更新' : result.msg,
+      status: props.item ? result.status : result.goods?.status || 'pending',
     }
     window.dispatchEvent(new Event('market:goods-updated'))
+    emit('saved')
   } catch (error) {
     publishError.value = error instanceof Error ? error.message : '发布失败，请稍后重试。'
   } finally {
@@ -123,13 +140,14 @@ async function publishPost() {
   }
 }
 // 弹窗关闭：把内层的三个子弹窗也一并关掉
-watch(() => props.visible, visible => { if (!visible) { pickerVisible.value = false; previewVisible.value = false; clearVisible.value = false } })
+watch(() => props.visible, visible => { if (visible) loadItem(props.item); else { pickerVisible.value = false; previewVisible.value = false; clearVisible.value = false } })
+watch(() => props.item?.id, itemId => { if (props.visible && itemId) loadItem(props.item) })
 // 卸载：标记 disposed 并释放所有本地图片链接。
  onBeforeUnmount(() => { disposed = true; revoke(draft.photos) })
 </script>
 <template>
   <!-- 主弹窗 -->
-  <Dialog v-model:visible="shown" modal header="发布商品" :draggable="false" :closable="!publishing" class="post-composer-dialog" :style="{ width: '46rem', maxWidth: 'calc(100vw - 2rem)' }">
+  <Dialog v-model:visible="shown" modal :header="props.item ? '编辑商品' : '发布商品'" :draggable="false" :closable="!publishing" class="post-composer-dialog" :style="{ width: '46rem', maxWidth: 'calc(100vw - 2rem)' }">
     <form id="post-editor" class="post-editor" @submit.prevent="previewPost">
       <div class="editor-intro"><p>填写商品信息，查看发布前的本地预览。</p><small>图片和草稿仅保留在当前会话，刷新后清空。</small></div>
       <section class="photos-field" aria-labelledby="photo-label"><div class="field-heading"><label id="photo-label">商品照片</label><small>{{ draft.photos.length }} / 9</small></div>
@@ -137,7 +155,7 @@ watch(() => props.visible, visible => { if (!visible) { pickerVisible.value = fa
              name="photo-list" 对应下方 .photo-list-* 动画类 -->
         <TransitionGroup name="photo-list" tag="div" class="photo-grid">
           <!-- v-for 带两个参数：(item, index)；:key 用照片唯一 id（排序动画的依据） -->
-          <div v-for="(photo, index) in draft.photos" :key="photo.id" class="photo-tile"><img :src="photo.url" :alt="(index === 0 ? '封面：' : '照片：') + photo.file.name"><span v-if="index === 0" class="cover-label">封面</span><Button class="photo-remove" rounded severity="secondary" size="small" :aria-label="'删除第 ' + (index + 1) + ' 张照片'" :disabled="processing" @click="removePhoto(index)"><X :size="14" aria-hidden="true" /></Button><div class="photo-order"><Button text severity="secondary" :disabled="index === 0 || processing" :aria-label="'将第 ' + (index + 1) + ' 张照片前移'" @click="movePhoto(index, -1)"><ChevronLeft :size="15" aria-hidden="true" /></Button><Button text severity="secondary" :disabled="index === draft.photos.length - 1 || processing" :aria-label="'将第 ' + (index + 1) + ' 张照片后移'" @click="movePhoto(index, 1)"><ChevronRight :size="15" aria-hidden="true" /></Button></div></div>
+          <div v-for="(photo, index) in draft.photos" :key="photo.id" class="photo-tile"><img :src="photo.url" :alt="(index === 0 ? '封面：' : '照片：') + (photo.file?.name || '已有照片')"><span v-if="index === 0" class="cover-label">封面</span><Button class="photo-remove" rounded severity="secondary" size="small" :aria-label="'删除第 ' + (index + 1) + ' 张照片'" :disabled="processing" @click="removePhoto(index)"><X :size="14" aria-hidden="true" /></Button><div class="photo-order"><Button text severity="secondary" :disabled="index === 0 || processing" :aria-label="'将第 ' + (index + 1) + ' 张照片前移'" @click="movePhoto(index, -1)"><ChevronLeft :size="15" aria-hidden="true" /></Button><Button text severity="secondary" :disabled="index === draft.photos.length - 1 || processing" :aria-label="'将第 ' + (index + 1) + ' 张照片后移'" @click="movePhoto(index, 1)"><ChevronRight :size="15" aria-hidden="true" /></Button></div></div>
         </TransitionGroup>
         <FileUpload ref="filePicker" mode="basic" customUpload auto multiple accept="image/jpeg,image/png,image/webp" :maxFileSize="10485760" chooseLabel="添加照片" :chooseButtonProps="{ severity: 'secondary', outlined: true }" :disabled="processing || draft.photos.length >= 9" invalidFileSizeMessage="{0} 超过大小限制，单张最多 10MB。" invalidFileTypeMessage="{0} 格式不支持，请选择 JPEG、PNG 或 WebP。" @uploader="addPhotos"><template #chooseicon><ImagePlus :size="17" aria-hidden="true" /></template></FileUpload>
         <p class="field-hint" role="status">{{ processing ? '正在读取图片…' : photoNote || '支持 JPEG、PNG、WebP，单张不超过 10MB。前移照片可更换封面。' }}</p>
@@ -146,7 +164,7 @@ watch(() => props.visible, visible => { if (!visible) { pickerVisible.value = fa
         <div class="editor-field"><label for="post-title">商品标题</label><InputText id="post-title" v-model="draft.title" maxlength="100" placeholder="商品名称、品牌与关键状态" fluid /><span class="field-count">{{ draft.title.length }} / 100</span></div>
         <div class="editor-field"><label for="post-content">物品描述（选填）</label><Textarea id="post-content" v-model="draft.content" maxlength="1000" rows="4" autoResize placeholder="写清配件及需要说明的商品信息。" fluid /><span class="field-count">{{ draft.content.length }} / 1000</span></div>
         <div class="idle-fields"><div class="editor-field"><label for="post-price">价格（元）</label><InputNumber v-model="draft.price" inputId="post-price" :min="0.01" :maxFractionDigits="2" :useGrouping="false" placeholder="请输入大于 0 的价格" fluid /></div><div class="editor-field"><label for="post-category">分类（选填）</label><Select v-model="draft.category" inputId="post-category" :options="categories.slice(1)" showClear placeholder="选择分类" fluid /></div></div>
-        <div class="editor-field"><span class="field-label">交易地点（本地选填）</span><Button unstyled class="location-field" @click="pickerVisible = true"><MapPin :size="20" aria-hidden="true" /><span><strong>{{ draft.place?.name || '添加公共交接地点' }}</strong><small>{{ draft.place?.address || '高德搜索与地图选点，仅保存到本地草稿' }}</small></span><ChevronRight :size="18" aria-hidden="true" /></Button></div>
+        <div class="editor-field"><span class="field-label">交易地点（本地选填）</span><Button unstyled class="location-field" @click="pickerVisible = true"><MapPin :size="20" aria-hidden="true" /><span><strong>{{ draft.place?.name || '添加公共交接地点' }}</strong><small>{{ draft.place?.address || '高德搜索与地图选点' }}</small></span><ChevronRight :size="18" aria-hidden="true" /></Button></div>
       </div>
       <Message v-if="issue" severity="error" :closable="false" size="small">{{ issue }}</Message>
       <Message severity="secondary" :closable="false" size="small">发布时会先上传图片，再提交商品。</Message>
@@ -155,7 +173,7 @@ watch(() => props.visible, visible => { if (!visible) { pickerVisible.value = fa
   </Dialog>
   <PlacePicker v-model:visible="pickerVisible" :value="draft.place" @select="draft.place = $event" />
   <!-- 预览弹窗：只读展示快照，不发布 -->
-  <Dialog v-model:visible="previewVisible" modal :draggable="false" :closable="!publishing" :header="publishResult ? '商品已提交' : '商品预览'" :style="{ width: '38rem', maxWidth: 'calc(100vw - 2rem)' }"><article v-if="preview" class="post-preview"><div class="preview-photos"><img v-for="photo in preview.local.photos" :key="photo.id" :src="photo.url" alt="商品照片预览"></div><small>{{ preview.goods.category || '商品' }}</small><h2>{{ preview.goods.title }}</h2><strong class="preview-price">{{ '¥' + preview.goods.price }}</strong><p v-if="preview.goods.description">{{ preview.goods.description }}</p><div v-if="preview.local.place" class="preview-place"><MapPin :size="17" aria-hidden="true" /><span>{{ preview.local.place.name }}（本地信息）</span></div><Message v-if="publishResult" severity="success" :closable="false" size="small">{{ publishResult.msg || '商品已由服务端接收。' }} 当前审核状态：{{ publishResult.status }}。</Message><Message v-else severity="secondary" :closable="false" size="small">确认发布后，图片会先上传到服务端；交易地点不属于商品接口字段。</Message><Message v-if="publishError" severity="error" :closable="false" size="small">{{ publishError }}</Message></article><template #footer><div class="composer-footer"><span></span><div><Button :label="publishResult ? '完成' : '返回编辑'" severity="secondary" text :disabled="publishing" @click="previewVisible = false" /><Button v-if="!publishResult" class="ink-button" :loading="publishing" :disabled="processing" @click="publishPost"><ImagePlus :size="16" aria-hidden="true" />上传图片并发布</Button></div></div></template></Dialog>
+  <Dialog v-model:visible="previewVisible" modal :draggable="false" :closable="!publishing" :header="publishResult ? (props.item ? '商品已更新' : '商品已提交') : '商品预览'" :style="{ width: '38rem', maxWidth: 'calc(100vw - 2rem)' }"><article v-if="preview" class="post-preview"><div class="preview-photos"><img v-for="photo in preview.local.photos" :key="photo.id" :src="photo.url" alt="商品照片预览"></div><small>{{ preview.goods.category || '商品' }}</small><h2>{{ preview.goods.title }}</h2><strong class="preview-price">{{ '¥' + preview.goods.price }}</strong><p v-if="preview.goods.description">{{ preview.goods.description.replace(/\n\{"position":.*\}$/, '') }}</p><div v-if="preview.local.place" class="preview-place"><MapPin :size="17" aria-hidden="true" /><span>{{ preview.local.place.name }}（本地信息）</span></div><Message v-if="publishResult" severity="success" :closable="false" size="small">{{ publishResult.msg || (props.item ? '商品已更新。' : '商品已由服务端接收。') }} 当前审核状态：{{ publishResult.status }}。</Message><Message v-else severity="secondary" :closable="false" size="small">确认后会提交商品。</Message><Message v-if="publishError" severity="error" :closable="false" size="small">{{ publishError }}</Message></article><template #footer><div class="composer-footer"><span></span><div><Button :label="publishResult ? '完成' : '返回编辑'" severity="secondary" text :disabled="publishing" @click="previewVisible = false" /><Button v-if="!publishResult" class="ink-button" :loading="publishing" :disabled="processing" @click="publishPost"><ImagePlus :size="16" aria-hidden="true" />{{ props.item ? '上传图片并保存' : '上传图片并发布' }}</Button></div></div></template></Dialog>
   <Dialog v-model:visible="clearVisible" modal header="清空当前草稿？" :draggable="false" :style="{ width: '24rem', maxWidth: 'calc(100vw - 2rem)' }"><p>将移除当前商品草稿的文字、照片和地点。</p><template #footer><Button label="保留草稿" severity="secondary" text @click="clearVisible = false" /><Button label="确认清空" severity="danger" @click="clearDraft" /></template></Dialog>
 </template>
 <style scoped>

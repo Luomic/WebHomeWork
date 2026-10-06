@@ -6,18 +6,19 @@ import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import Textarea from 'primevue/textarea'
-import { MapPin, ImageOff, Flag } from 'lucide-vue-next'
+import { MapPin, ImageOff, Flag, Pencil, ShoppingCart, Store } from 'lucide-vue-next'
 import { priceLabel, type MarketItem } from '@/data/market'
 import Star from '@primeicons/vue/star'
 import StarFill from '@primeicons/vue/star-fill'
-import { reportGoods, authState, isLoggedIn, currentUserId, canDeleteGoods, deleteGoods, getFavorites, setFavorite } from '@/api/client'
+import { reportGoods, authState, isLoggedIn, currentUserId, canDeleteGoods, deleteGoods, getFavorites, setFavorite, requestPurchase, getSellResult, closeSale } from '@/api/client'
 // item：要展示的商品（null = 弹窗关闭）；showMap：是否显示"在地图查看"按钮
 const props = withDefaults(defineProps<{ item: MarketItem | null; showMap?: boolean }>(), { showMap: true })
 // close：关闭弹窗事件；map：点"在地图查看"时把商品抛给父级
-const emit = defineEmits<{ close: []; map: [item: MarketItem] }>()
+const emit = defineEmits<{ close: []; map: [item: MarketItem]; edit: [item: MarketItem] }>()
 const activeImageIndex = ref(0)
 const actionIssue = ref(''), actionNotice = ref('')
-const deleting = ref(false), favoriteBusy = ref(false), favoriteReady = ref(false), favorited = ref(false)
+const deleting = ref(false), favoriteBusy = ref(false), favoriteReady = ref(false), favorited = ref(false), purchaseBusy = ref(false), saleBusy = ref(false)
+const purchaseIssue = ref(''), purchaseNotice = ref(''), purchaseStatus = ref<string | null>(null)
 const canDelete = computed(() => !!props.item && !props.item.isExample && canDeleteGoods(props.item.userId))
 const ownPost = computed(() => currentUserId.value !== null && String(currentUserId.value) === String(props.item?.userId))
 let favoriteLoad = 0
@@ -34,6 +35,31 @@ watch([() => props.item?.id, () => authState.token, isLoggedIn], async () => {
     if (version === favoriteLoad) actionIssue.value = error instanceof Error ? error.message : '收藏状态加载失败，请重新打开详情。'
   }
 }, { immediate: true })
+watch(() => props.item?.id, async () => {
+  purchaseIssue.value = ''; purchaseNotice.value = ''; purchaseStatus.value = null
+  if (!props.item || !isLoggedIn.value || props.item.isExample || ownPost.value) return
+  try {
+    const result = await getSellResult(props.item.id)
+    if (props.item) purchaseStatus.value = result.status
+  } catch { /* 404 表示尚未发起购买请求 */ }
+}, { immediate: true })
+async function buyPost() {
+  if (!props.item || purchaseBusy.value || purchaseStatus.value === 'pending' || props.item.saleClosed) return
+  purchaseBusy.value = true; purchaseIssue.value = ''; purchaseNotice.value = ''
+  try {
+    const result = await requestPurchase(props.item.id)
+    purchaseNotice.value = result.message || '购买请求已发送'
+    purchaseStatus.value = 'pending'
+  } catch (error) { purchaseIssue.value = error instanceof Error ? error.message : '购买请求发送失败。' }
+  finally { purchaseBusy.value = false }
+}
+async function stopSale() {
+  if (!props.item || saleBusy.value || props.item.saleClosed || !window.confirm('关闭售卖后将不能再接受新的购买请求，确定继续吗？')) return
+  saleBusy.value = true; purchaseIssue.value = ''; purchaseNotice.value = ''
+  try { await closeSale(props.item.id); purchaseNotice.value = '已关闭售卖'; window.dispatchEvent(new Event('market:goods-updated')) }
+  catch (error) { purchaseIssue.value = error instanceof Error ? error.message : '关闭售卖失败。' }
+  finally { saleBusy.value = false }
+}
 async function toggleFavorite() {
   if (!props.item || favoriteBusy.value || !favoriteReady.value) return
   const id = props.item.id, token = authState.token, next = !favorited.value
@@ -129,9 +155,14 @@ const visible = computed({
       <Message v-if="item.isExample" severity="secondary" :closable="false" size="small">当前为本地 API 数据示例，不代表真实在售商品。</Message>
       <Message v-if="actionIssue" severity="error" :closable="false">{{ actionIssue }}</Message>
       <Message v-if="actionNotice" severity="success" :closable="false">{{ actionNotice }}</Message>
+      <Message v-if="purchaseIssue" severity="error" :closable="false">{{ purchaseIssue }}</Message>
+      <Message v-if="purchaseNotice" severity="success" :closable="false">{{ purchaseNotice }}</Message>
       <div class="detail-actions">
+        <Button v-if="isLoggedIn && !ownPost && !item.isExample" class="ink-button" :disabled="purchaseBusy || ['pending','approved'].includes(purchaseStatus || '') || item.saleClosed" :loading="purchaseBusy" @click="buyPost"><ShoppingCart :size="16" aria-hidden="true" />{{ item.saleClosed ? '已关闭售卖' : purchaseStatus === 'approved' ? '交易已同意' : purchaseStatus === 'rejected' ? '重新发起购买' : purchaseStatus === 'closed' ? '交易已关闭' : purchaseStatus === 'pending' ? '等待卖家处理' : '发起购买请求' }}</Button>
+        <Button v-if="ownPost && !item.isExample && !item.saleClosed" severity="secondary" outlined :loading="saleBusy" :disabled="saleBusy" @click="stopSale"><Store :size="16" aria-hidden="true" />关闭售卖</Button>
         <Button v-if="isLoggedIn && !ownPost && !item.isExample" severity="secondary" outlined :loading="favoriteBusy" :disabled="!favoriteReady || favoriteBusy || deleting" :aria-pressed="favorited" @click="toggleFavorite"><component :is="favorited ? StarFill : Star" aria-hidden="true" />{{ favorited ? '取消收藏' : '收藏' }}</Button>
         <Button v-if="canDelete" severity="danger" outlined :loading="deleting" :disabled="deleting || favoriteBusy" @click="removePost">删除帖子</Button>
+        <Button v-if="ownPost && !item.isExample" severity="secondary" outlined :disabled="deleting || favoriteBusy" @click="emit('edit', item)"><Pencil :size="16" aria-hidden="true" />编辑帖子</Button>
         <!-- 点击向父级抛 map 事件 -->
         <Button v-if="showMap && item.position" class="ink-button" @click="emit('map', item)"><MapPin :size="16" aria-hidden="true" />在地图查看</Button>
         <Button severity="secondary" text class="detail-report-button" :aria-expanded="reportOpen" :aria-controls="reportId + '-form'" @click="reportOpen = !reportOpen"><Flag :size="16" aria-hidden="true" />举报商品</Button>

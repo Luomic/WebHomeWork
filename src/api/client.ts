@@ -1,5 +1,5 @@
 import { computed, reactive } from 'vue'
-import type { GoodsList, GoodsPost, GoodImg, GoodsRequest } from '@/types/goods/Goods'
+import type { GoodsList, GoodsPage, GoodsPost, GoodImg, GoodsRequest, GoodsUpdateRequest } from '@/types/goods/Goods'
 import type { GoodsReport, GoodsAuditAction, ReportHandleAction } from '@/types/admin/review'
 import type { DayGet } from '@/types/report/day'
 import type { LoginRequest, LoginResult, RegisterRequest } from '@/types/auth/Login'
@@ -118,12 +118,12 @@ export function register(payload: RegisterRequest) {
 export function getGoods(keyword = '', page = 1) {
   const query = new URLSearchParams({ page: String(Math.max(1, page)) })
   if (keyword.trim()) query.set('keyword', keyword.trim())
-  return request<GoodsList<string[]>[]>('/api/goods?' + query)
+  return request<GoodsPage<string[]>>('/api/goods?' + query)
 }
 /** 已排序分页，但反馈是有bug的，这里按下不表 */
-export function getRankedGoods() {
-  return request<GoodsList<string[]>[]>('/api/goods/ranked').catch(error => {
-    if (error instanceof ApiError && error.code === 404) return []
+export function getRankedGoods(page = 1) {
+  return request<GoodsPage<string[]>>('/api/goods/ranked?page=' + Math.max(1, page)).catch(error => {
+    if (error instanceof ApiError && error.code === 404) return { goods: [], totalpage: 0 }
     throw error
   })
 }
@@ -155,6 +155,12 @@ export function createGoods(payload: GoodsRequest) {
   if (!Number.isFinite(payload.price) || payload.price <= 0) throw new Error('商品价格必须大于 0。')
   return request<GoodsPost<string[]>>('/api/goods', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  })
+}
+
+export function updateGoods(id: string | number, payload: GoodsUpdateRequest) {
+  return request<GoodsList<string[]>>('/api/goods/' + encodeURIComponent(id), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
   })
 }
 
@@ -209,6 +215,37 @@ export function getFavorites() { return request<GoodsList<string[]>[]>('/api/pos
 export function setFavorite(id: string | number, favorite: boolean) {
   return request<string>('/api/posts/' + encodeURIComponent(id) + '/favorite', { method: favorite ? 'POST' : 'DELETE' })
 }
+
+export interface SellNotice { request_id: string; account: string; goods_id: number }
+export interface SellRequestSummary { request_id: string; account: string; goods_id: number; status: string; position: [number, number] | null; created_at: string }
+export interface SellResult { status: 'pending' | 'approved' | 'rejected' | 'closed'; position: [number, number] | null }
+export interface PurchaseRecord {
+  request_id: string
+  goods_id: number
+  title: string
+  price: number
+  images: string[] | null
+  seller_id: number
+  status: SellResult['status']
+  position: [number, number] | null
+  created_at: string
+  handled_at: string | null
+}
+export interface PurchasePage { list: PurchaseRecord[]; totalpage: number }
+
+export function requestPurchase(goodsId: string | number) {
+  return request<{ message: string }>('/api/sell/request/' + encodeURIComponent(goodsId), { method: 'POST' })
+}
+export function getSellNotices() { return request<SellNotice[]>('/api/sell/notice') }
+export function replySellNotice(requestId: string, status: 'approve' | 'reject', position?: [number, number]) {
+  return request<{ message: string }>('/api/sell/notice/' + encodeURIComponent(requestId) + '/reply', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, ...(position ? { position } : {}) }),
+  })
+}
+export function getSellResult(goodsId: string | number) { return request<SellResult>('/api/sell/result/' + encodeURIComponent(goodsId)) }
+export function closeSale(goodsId: string | number) { return request<{ message: string }>('/api/sell/close/' + encodeURIComponent(goodsId), { method: 'POST' }) }
+export function getMySellRequests() { return request<SellRequestSummary[]>('/api/sell/mine') }
+export function getMyPurchases(page = 1) { return request<PurchasePage>('/api/sell/purchase?page=' + Math.max(1, page)) }
 
 export interface AgentSession {
   id: number

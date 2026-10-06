@@ -14,6 +14,12 @@ export interface GoodsList<T = string[]> {
   created_at?: string;
   updated_at?: string;
   deleted_at?: string | null;
+  sale_closed?: boolean;
+}
+
+export interface GoodsPage<T = string[]> {
+  goods: GoodsList<T>[] | null;
+  totalpage: number;
 }
 
 /** 发布、修改商品的 JSON 请求体；图片先由上传接口取得 URL。 */
@@ -24,6 +30,8 @@ export interface GoodsRequest {
   images: string[];
   category?: string;
 }
+
+export type GoodsUpdateRequest = Partial<GoodsRequest>
 
 /** 发布成功响应中的 data。 */
 export interface GoodsPost<T = string[]> {

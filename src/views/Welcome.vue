@@ -50,6 +50,9 @@ function handleLeave() {
   el.style.setProperty('--y', '-200px')
   for (const name of ['--title-tx', '--title-ty', '--title-rx', '--title-ry']) el.style.removeProperty(name)
 }
+function goGithub(){
+  window.location.href = "https://github.com/Luomic/WebHomeWork"
+}
 </script>
 
 <template>
@@ -60,7 +63,7 @@ function handleLeave() {
         <AngleDoubleRight :size="22" />
         逛市集
       </Button>
-      <Button rounded class="button-gett">
+      <Button rounded class="button-gett" @click="goGithub">
         <Github :size="22" />
         Github
       </Button>

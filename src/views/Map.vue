@@ -77,7 +77,7 @@ const selected = computed(() => visibleItems.value.find(item => item.id === sele
 function distanceLabel(item) {
   if (!item.position) return '接口未提供坐标'
   const value = item.distance
-  return value === null ? '示例交接点' : (value < 1000 ? Math.round(value) + ' m' : (value / 1000).toFixed(1) + ' km') + ' · 直线距离'
+  return value === null ? '定位后获取距离' : (value < 1000 ? Math.round(value) + ' m' : (value / 1000).toFixed(1) + ' km') + ' · 直线距离'
 }
 // 选中某个商品：地图平移过去 + 列表滚到对应行
 async function selectItem(item, pan = true) {
@@ -199,7 +199,12 @@ async function loadGoods() {
   loadingGoods.value = true
   goodsError.value = ''
   try {
-    const goods = await getRankedGoods()
+    const firstPage = await getRankedGoods(1)
+    const goods = [...(firstPage.goods ?? [])]
+    for (let page = 2; page <= firstPage.totalpage; page++) {
+      const result = await getRankedGoods(page)
+      goods.push(...(result.goods ?? []))
+    }
     items.value = goods.map(item => toMarketItem({
       ...item,
       images: Array.isArray(item.images) ? item.images.map(resolveAssetUrl) : [],
@@ -228,7 +233,7 @@ onBeforeUnmount(() => { disposed = true; window.removeEventListener('market:good
       <!-- 抽屉把手按钮：aria-expanded 告诉读屏当前展开状态 -->
       <Button unstyled class="sheet-toggle" :aria-expanded="sheetState !== 'peek'" aria-controls="map-panel-content" :aria-label="sheetState === 'full' ? '收起商品列表' : '展开商品列表'" @click="toggleSheet"><span class="sheet-grip"></span><span>{{ visibleItems.length }} 件商品</span><component :is="sheetState === 'full' ? ChevronDown : ChevronUp" :size="18" aria-hidden="true" /></Button>
       <div id="map-panel-content" class="panel-content">
-        <div class="panel-heading"><div><h1>附近商品</h1><p>服务端商品 · 位置以接口字段为准</p></div><MapPin :size="20" aria-hidden="true" /></div>
+        <div class="panel-heading"><div><h1>附近商品</h1><p>来找找附近的好物吧！</p></div><MapPin :size="20" aria-hidden="true" /></div>
         <label class="map-search"><Search :size="17" aria-hidden="true" /><InputText v-model="query" aria-label="搜索附近商品" placeholder="搜索想找的商品" fluid /></label>
         <!-- 分类下拉 + 距离下拉（没定位过时禁用） -->
         <div class="map-filters"><Select v-model="category" :options="categories" aria-label="商品分类" size="small" /><Select v-model="radius" :options="radiusOptions" optionLabel="label" optionValue="value" aria-label="距离范围，需要先定位" size="small" :disabled="!userPosition" /></div>
@@ -239,7 +244,7 @@ onBeforeUnmount(() => { disposed = true; window.removeEventListener('market:good
             <Button unstyled class="result-button" :aria-pressed="selectedId === item.id" @click="selectItem(item)">
               <img v-if="item.image" :src="item.image" :alt="item.title" :style="{ objectPosition: item.imagePosition }" loading="lazy" decoding="async">
               <span v-else class="result-missing"><ImageOff :size="22" aria-hidden="true" /></span>
-              <span class="result-copy"><strong>{{ item.title }}</strong><b>{{ priceLabel(item.price) }}</b><small>{{ item.place || '未提供交易地点' }}</small><small>{{ distanceLabel(item) }}</small></span>
+              <span class="result-copy"><strong>{{ item.title }}</strong><b>{{ priceLabel(item.price) }}</b><small>{{ item.place || '点击查看交易地点' }}</small><small>{{ distanceLabel(item) }}</small></span>
             </Button>
             <Transition name="result-reveal"><div v-if="selectedId === item.id" class="result-actions"><Button label="查看商品详情" size="small" severity="secondary" @click="detail = item" /><Button text severity="secondary" size="small" aria-label="取消选中" @click="selectedId = null"><X :size="15" aria-hidden="true" /></Button></div></Transition>
           </article>
