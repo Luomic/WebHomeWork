@@ -1,6 +1,4 @@
 <script setup lang="ts">
-// 商品详情弹窗。visible 是个"桥接"：父级传 item 进来（有值=打开），
-// 关闭时组件反向 emit('close') 让父级把 item 置空，两边状态保持一致。
 import { computed, ref, useId, watch } from 'vue'
 import Dialog from 'primevue/dialog'
 import Button from 'primevue/button'
@@ -11,9 +9,7 @@ import { priceLabel, type MarketItem } from '@/data/market'
 import Star from '@primeicons/vue/star'
 import StarFill from '@primeicons/vue/star-fill'
 import { reportGoods, authState, isLoggedIn, currentUserId, canDeleteGoods, deleteGoods, getFavorites, setFavorite, requestPurchase, getSellResult, closeSale } from '@/api/client'
-// item：要展示的商品（null = 弹窗关闭）；showMap：是否显示"在地图查看"按钮
 const props = withDefaults(defineProps<{ item: MarketItem | null; showMap?: boolean }>(), { showMap: true })
-// close：关闭弹窗事件；map：点"在地图查看"时把商品抛给父级
 const emit = defineEmits<{ close: []; map: [item: MarketItem]; edit: [item: MarketItem] }>()
 const activeImageIndex = ref(0)
 const actionIssue = ref(''), actionNotice = ref('')
@@ -124,8 +120,6 @@ function formatDate(value?: string) {
   const date = new Date(value)
   return Number.isNaN(date.valueOf()) ? value : date.toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })
 }
-// computed 写成 get/set 形式：读 = item 有值就是打开；写（v-model:visible 改它）=
-// 只有"改成关"才向父级 emit close。桥接组件状态和父级状态
 const visible = computed({
   get: () => !!props.item,               // !!：把对象/null 转成 true/false
   set: value => { if (!value) emit('close') },
@@ -134,23 +128,18 @@ const visible = computed({
 <template>
 
   <Dialog v-model:visible="visible" modal :draggable="false" :closable="!reportSubmitting && !deleting && !favoriteBusy" class="market-detail-dialog" :header="'商品详情'" :style="{ width: '42rem', maxWidth: 'calc(100vw - 2rem)' }">
-    <!-- v-if="item"：没数据时内部什么都不渲染 -->
     <article v-if="item" class="market-detail">
-      <!-- 详情大图：按图片原始比例缩放并居中，完整展示且不人为铺满灰色背景。 -->
       <img v-if="activeImage" class="detail-image" :src="activeImage" :alt="item.title + '，第 ' + (activeImageIndex + 1) + ' 张图片'" decoding="async">
-      <!-- 无图占位 -->
       <div v-else class="detail-missing"><ImageOff :size="30" aria-hidden="true" /><span>暂无实拍图片</span></div>
       <div v-if="images.length > 1" class="detail-gallery" aria-label="选择商品图片">
         <Button v-for="(url, index) in images" :key="index" unstyled class="detail-thumbnail" :class="{ active: activeImageIndex === index }" :aria-label="'查看第 ' + (index + 1) + ' 张图片'" :aria-pressed="activeImageIndex === index" @click="activeImageIndex = index">
           <img :src="url" alt="" loading="lazy" decoding="async">
         </Button>
       </div>
-      <!-- 标题行：商品右侧跟价格 -->
       <div class="detail-heading"><h2>{{ item.title }}</h2><strong>{{ priceLabel(item.price) }}</strong></div>
       <p class="detail-author">{{ item.author }} · {{ item.category }}</p>
       <div class="detail-meta"><span>商品 #{{ item.id }}</span><span>{{ statusLabels[item.status] }}</span><time>{{ formatDate(item.createdAt) }}</time></div>
       <p class="detail-description">{{ item.description }}</p>
-      <!-- 地点信息块：图钉图标 + 小标签 + 地名 -->
       <div v-if="item.place" class="detail-location"><MapPin :size="18" aria-hidden="true" /><div><small>{{ item.locationSource === 'example' ? '本地示例交接地点' : '交接地点' }}</small><p>{{ item.place }}</p></div></div>
       <Message v-if="item.isExample" severity="secondary" :closable="false" size="small">当前为本地 API 数据示例，不代表真实在售商品。</Message>
       <Message v-if="actionIssue" severity="error" :closable="false">{{ actionIssue }}</Message>
@@ -163,7 +152,6 @@ const visible = computed({
         <Button v-if="isLoggedIn && !ownPost && !item.isExample" severity="secondary" outlined :loading="favoriteBusy" :disabled="!favoriteReady || favoriteBusy || deleting" :aria-pressed="favorited" @click="toggleFavorite"><component :is="favorited ? StarFill : Star" aria-hidden="true" />{{ favorited ? '取消收藏' : '收藏' }}</Button>
         <Button v-if="canDelete" severity="danger" outlined :loading="deleting" :disabled="deleting || favoriteBusy" @click="removePost">删除帖子</Button>
         <Button v-if="ownPost && !item.isExample" severity="secondary" outlined :disabled="deleting || favoriteBusy" @click="emit('edit', item)"><Pencil :size="16" aria-hidden="true" />编辑帖子</Button>
-        <!-- 点击向父级抛 map 事件 -->
         <Button v-if="showMap && item.position" class="ink-button" @click="emit('map', item)"><MapPin :size="16" aria-hidden="true" />在地图查看</Button>
         <Button severity="secondary" text class="detail-report-button" :aria-expanded="reportOpen" :aria-controls="reportId + '-form'" @click="reportOpen = !reportOpen"><Flag :size="16" aria-hidden="true" />举报商品</Button>
       </div>
@@ -181,13 +169,7 @@ const visible = computed({
   </Dialog>
 </template>
 <style scoped>
-/* 详情容器：flex 纵向排列，子元素间距 18px；font 简写同时设字号和行高 */
 .market-detail{display:flex;flex-direction:column;gap:18px;font:14px/1.65 system-ui,sans-serif;color:var(--app-text)}
-/*
- * 不强制图片占满整行：contain 配合 width:100% 会让窄图两侧出现大片背景色。
- * 让替换元素按自身比例确定尺寸，再分别限制宽高，图片旁不会生成灰色色块，
- * 同时仍然不会裁切图片，也不会撑破详情弹窗。
- */
 .detail-image{display:block;align-self:center;width:auto;max-width:100%;height:auto;max-height:min(420px,60vh);object-fit:contain;background:transparent;border-radius:10px}
 .detail-gallery{display:flex;gap:8px;overflow-x:auto;padding:3px;scrollbar-width:thin}
 .detail-thumbnail{display:grid;place-items:center;flex:none;width:62px;height:62px;padding:0;border:1px solid var(--app-border);border-radius:8px;overflow:hidden;background:var(--app-hover);color:var(--app-muted);cursor:pointer}
@@ -195,16 +177,12 @@ const visible = computed({
 .detail-thumbnail:focus-visible{outline:2px solid var(--app-text);outline-offset:2px}
 .detail-thumbnail img{width:100%;height:100%;object-fit:cover}
 .detail-meta{display:flex;flex-wrap:wrap;gap:6px 14px;color:var(--app-muted);font-size:11px}
-/* 无图占位块 */
 .detail-missing{min-height:180px;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;background:var(--app-hover);border-radius:10px;color:var(--app-muted)}
-/* 标题行：space-between 把价格推到最右；align-items:baseline 让文字底部对齐 */
 .detail-heading{display:flex;gap:16px;justify-content:space-between;align-items:baseline}
 .detail-heading h2{margin:0;font-size:20px;font-weight:600;min-width:0;overflow-wrap:anywhere}
 .detail-heading strong{font-size:24px;white-space:nowrap;font-variant-numeric:tabular-nums} /* 价格不换行、等宽数字 */
 .detail-author{margin:0;color:var(--app-muted);font-size:12px}
-/* pre-wrap：保留描述里的换行和空格；anywhere：长英文单词也允许断行，防止撑破容器 */
 .detail-description{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
-/* 地点信息块：图标和文字横排居中 */
 .detail-location{display:flex;gap:10px;align-items:center;padding:14px;background:var(--app-hover);border-radius:8px}
 .detail-location p{margin:2px 0 0}
 .detail-location small{color:var(--app-muted)}

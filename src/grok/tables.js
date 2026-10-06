@@ -1,6 +1,3 @@
-/* Vendored from grok-icon-study/replica —— 仅供学习研究，角色造型与商标归 xAI 及相应权利人。
- * 本文件由 port-to-vue.mjs 自动生成，请勿手工编辑：改动请改上游或脚本后重新生成。
- * 局部单字母变量名沿用上游混淆产物，未做重命名。 */
 import { GROK_GEO } from './geometry.js'
 
 export const GROUPS = [
@@ -99,7 +96,6 @@ export const OVERLAY_ZOOM = {
 };
 export const overlayViewZoom = (kind, scale) => (kind == null ? 1 : Math.max(OVERLAY_ZOOM[kind] / Math.max(scale, 1), 1));
 
-// Source G_t / MNe / Y_t — login ink. Live $_t uses --fg = ink.flat ?? MNe(color).
 export const INK = {
   black: { lightFrom: "#585858", lightTo: "#000000", darkFrom: "#FFFFFF", darkTo: "#C2C2C2" },
   brown: { lightFrom: "#AE8968", lightTo: "#855C36", darkFrom: "#A27952", darkTo: "#604227" },

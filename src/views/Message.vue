@@ -53,7 +53,6 @@ const filteredReminders = computed(() => {
   return term ? reminders.value.filter(item => [item.type, item.title, item.content, item.purchase?.request_id, item.purchase?.goods_id, item.purchase?.seller_id].join(' ').toLowerCase().includes(term)) : reminders.value
 })
 const tradePosition = computed<[number, number] | null>(() => {
-  // 空输入不能用 Number 转换，否则会被误当成合法的零坐标。
   if (!longitude.value.trim() || !latitude.value.trim()) return null
   const lng = Number(longitude.value), lat = Number(latitude.value)
   return Number.isFinite(lng) && Number.isFinite(lat) && Math.abs(lng) <= 180 && Math.abs(lat) <= 90 ? [lng, lat] : null
@@ -94,7 +93,6 @@ async function load(page = purchasePage.value) {
     if (activeView.value === 'buyer') {
       let result = await getMyPurchases(page)
       if (sequence !== loadSequence) return
-      // 刷新后记录减少时回到最后一页，避免停在已经不存在的页码。
       const lastPage = Math.max(1, result.totalpage)
       if (page > lastPage) {
         page = lastPage
@@ -150,7 +148,6 @@ async function submitReply(status: 'approve' | 'reject') {
   catch (error) { if (sessionToken === authState.token) replyIssue.value = error instanceof Error ? error.message : '处理交易请求失败。' }
   finally { actionBusy.value = false; replyAction.value = null }
 }
-// 切换视角或账户时清空旧记录，迟到的请求由序号拦截。
 watch([activeView, isLoggedIn, () => authState.token], () => {
   reminders.value = []; selectedId.value = ''; query.value = ''; detailOpen.value = false
   purchasePage.value = 1; purchaseTotalPages.value = 0; replyNotice.value = ''

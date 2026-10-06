@@ -1,16 +1,8 @@
-/* 导入 Tailwind CSS v4 的全部入口（预检样式 reset + 工具类）。v4 没有 config 文件，
- * 一切定制都在这个 CSS 文件里用 @xxx 指令完成 */
 @import "tailwindcss";
-/* tailwindcss-primeui：把 PrimeVue 的主题变量（bg-surface-100、text-muted-color 等）
- * 映射成 Tailwind 工具类，模板里可以直接给 PrimeVue 组件写这些类 */
 @import "tailwindcss-primeui";
 
-/* @custom-variant：自定义一个 dark: 变体，钉在 .to-dark 类上（而不是默认的跟随系统）。
- * 语法：&:where(.to-dark, .to-dark *) 表示"元素自身或祖先有 .to-dark 类"时命中。
- * 这样 Tailwind 的 dark:bg-xxx 和 PrimeVue 的暗色变量随同一个类切换 */
 @custom-variant dark (&:where(.to-dark, .to-dark *));
 
-/* @layer base：放进基础层，优先级低于工具类；body 全局样式放这里 */
 @layer base {
   body {
     margin: 0;                  /* Tailwind 预检已清掉浏览器默认的 8px 外边距，这里保持 0 */

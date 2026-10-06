@@ -53,23 +53,18 @@ function resolvePoint(position: [number, number]) {
     } else fallback(amapError(result, '地址解析'))   // 解析失败 → 降级
   }) } catch (cause) { if (active(id)) { invalidate(); fallback(amapError(cause, '地址解析')) } }
 }
-// 搜索地点
 function search() {
   if (!searchService || !query.value.trim()) return
   const id = begin(); searching.value = true; results.value = []; feedback.value = ''
   try { searchService.search(query.value.trim(), (status: string, result: any) => {
     if (!active(id)) return
     clearTimeout(operationTimer); searching.value = false
-    // no_data 是"没搜到"（正常情况），其余状态当错误处理
     if (status !== 'complete') { feedback.value = status === 'no_data' ? '没有找到地点，请换一个具体名称。' : amapError(result, '地点搜索'); return }
-    // 链式处理：取 POI 列表 → filter 过滤没有经纬度的脏数据 → map 转成 PlaceValue 结构。
-    // [pname, cityname, ...].filter(Boolean).join('')：把非空的省市区地址拼成一串
     results.value = (result?.poiList?.pois ?? []).filter((poi: any) => poi.location?.getLng && poi.location?.getLat).map((poi: any) => ({ name: poi.name, address: [poi.pname, poi.cityname, poi.adname, typeof poi.address === 'string' ? poi.address : ''].filter(Boolean).join(''), position: [poi.location.getLng(), poi.location.getLat()], poiId: poi.id, source: 'poi' }))
     if (!results.value.length) feedback.value = '没有可选坐标，请换一个具体地点名称。'
   }) } catch (cause) { if (active(id)) { invalidate(); feedback.value = amapError(cause, '地点搜索') } }
 }
 async function locate() {
-  // 正在定位中就不重复触发
   if (!sdk || !map || locating.value) return
   invalidate()
   const id = sequence, controller = new AbortController()
@@ -79,7 +74,6 @@ async function locate() {
     if (!active(id)) return
     resolvePoint(result.position)
   } catch (cause) {
-    // instanceof：判断错误类型，拿得到 message 就显示原始信息
     if (active(id)) feedback.value = cause instanceof Error ? cause.message : '定位失败，请搜索地点或手动选点。'
   } finally { if (active(id)) { locating.value = false; locationAbort = null } }  // finally：无论成败都执行
 }
@@ -98,7 +92,6 @@ async function start() {
       resizeEnable: true,                          // 容器尺寸变化自动适应
       animateEnable: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,  // 减少动效时关动画
     })
-    // 左下角（LB）加比例尺控件
     map.addControl(new sdk.Scale({ position: 'LB' }))
     searchService = new sdk.PlaceSearch({ city: '杭州', citylimit: true, pageSize: 8, extensions: 'base' })
     geocoder = new sdk.Geocoder({ city: '杭州', extensions: 'base' })

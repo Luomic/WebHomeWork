@@ -32,7 +32,6 @@ function creationTime(value?: string) {
   return Number.isNaN(time) ? Number.POSITIVE_INFINITY : time
 }
 
-// 接口举报列表包含全部状态；待处理数量独立于搜索结果，并保留创建时间升序。
 const allPendingGoods = computed(() => pendingGoods.value
   .filter(item => item.status === 'pending')
   .sort((a, b) => creationTime(a.created_at) - creationTime(b.created_at) || a.id - b.id))
@@ -79,7 +78,6 @@ async function removeGoods(item: GoodsList<string[]>) {
   finally { busyGoods.value = null }
 }
 
-// 审核成功后才从当前列表移除，避免把未获服务端确认的操作显示成成功。
 async function reviewGoods(item: GoodsList<string[]>, action: 'approve' | 'reject') {
   const label = action === 'approve' ? '通过' : '驳回'
   if (busyGoods.value !== null) return
@@ -113,7 +111,6 @@ async function reviewReport(item: GoodsReport, action: 'valid' | 'invalid') {
   }
 }
 
-// 管理员页面打开时同时加载两个待处理列表；任一接口失败都会保留错误并允许重试。
 async function loadAdminData() {
   loading.value = true
   loadError.value = ''

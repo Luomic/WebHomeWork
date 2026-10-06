@@ -2,7 +2,6 @@ function escapeHtml(value: string) {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 }
 
-/** 轻量 Markdown 渲染器：先转义文本，再只生成受控标签，避免执行模型返回的 HTML。 */
 export function renderMarkdown(source: string) {
   const lines = source.split(/\r?\n/)
   const html: string[] = []

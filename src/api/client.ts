@@ -4,14 +4,7 @@ import type { GoodsReport, GoodsAuditAction, ReportHandleAction } from '@/types/
 import type { DayGet } from '@/types/report/day'
 import type { LoginRequest, LoginResult, RegisterRequest } from '@/types/auth/Login'
 
-/**
- * 统一 API 客户端。Host 可通过 VITE_API_BASE_URL 覆盖，默认使用用户提供的服务地址。
- * 业务接口大多会在 HTTP 200 中返回 code，因此这里同时检查 HTTP 状态和业务 code。
- */
 const configuredApiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://121.40.220.225:8080').replace(/\/$/, '')
-// 开发和本地预览走 Vite 同源代理，避免后端未配置 CORS 导致浏览器 Failed to fetch。
-// VITE_API_USE_PROXY 允许 preview 或部署到已配置反向代理的站点继续使用同源请求；
-// 关闭时才会在生产构建中直连完整 Host，此时后端必须开启 CORS。
 const useApiProxy = import.meta.env.DEV || import.meta.env.VITE_API_USE_PROXY === 'true'
 export const API_BASE_URL = useApiProxy ? '' : configuredApiBaseUrl
 const TOKEN_KEY = 'market_api_token'
@@ -24,7 +17,6 @@ export class ApiError extends Error {
   }
 }
 
-/** 返回登录状态 */
 function readStoredUser(): LoginResult['user'] | null {
   try {
     const value = localStorage.getItem(USER_KEY)
@@ -40,7 +32,6 @@ export const authState = reactive({
   user: typeof localStorage === 'undefined' ? null : readStoredUser(),
 })
 
-/** 设置用户数据 */
 export function setAuth(result: LoginResult) {
   authState.validated = true
   authState.token = result.token
@@ -61,7 +52,6 @@ export function resolveAssetUrl(url?: string | null) {
   if (!url) return ''
   if (url.startsWith('blob:') || url.startsWith('data:')) return url
   if (/^https?:\/\//i.test(url) || url.startsWith('//')) {
-    // 后端绝对图片地址也走同源代理，避免 HTTPS 页面加载 HTTP 图片被拦截。
     if (useApiProxy) {
       try {
         const assetUrl = new URL(url, configuredApiBaseUrl)
@@ -75,7 +65,6 @@ export function resolveAssetUrl(url?: string | null) {
   return API_BASE_URL + (url.startsWith('/') ? '' : '/') + url
 }
 
-/** 异步请求Response */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (!headers.has('Accept')) headers.set('Accept', 'application/json')
@@ -85,7 +74,6 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   try {
     response = await fetch(API_BASE_URL + path, { ...init, headers })
   } catch (error) {
-    // 补充当前运行方式
     const reason = error instanceof Error && error.message ? `（${error.message}）` : ''
     const endpoint = useApiProxy ? '同源 API 代理' : configuredApiBaseUrl
     throw new ApiError(`无法连接 ${endpoint}，请确认服务已启动且网络可达${reason}`, 0)
@@ -102,25 +90,21 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   return (body?.data ?? body) as T
 }
-/** 登录方法 */
 export function login(payload: LoginRequest) {
   return request<LoginResult>('/api/auth/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
   }).then(result => { result.user = { ...result.user, account: result.user.account || payload.account }; setAuth(result); return result })
 }
-/** 注册方法 */
 export function register(payload: RegisterRequest) {
   return request<{ msg?: string }>('/api/auth/register', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
   })
 }
-/** 按分页显示 */
 export function getGoods(keyword = '', page = 1) {
   const query = new URLSearchParams({ page: String(Math.max(1, page)) })
   if (keyword.trim()) query.set('keyword', keyword.trim())
   return request<GoodsPage<string[]>>('/api/goods?' + query)
 }
-/** 已排序分页，但反馈是有bug的，这里按下不表 */
 export function getRankedGoods(page = 1) {
   return request<GoodsPage<string[]>>('/api/goods/ranked?page=' + Math.max(1, page)).catch(error => {
     if (error instanceof ApiError && error.code === 404) return { goods: [], totalpage: 0 }
@@ -190,7 +174,6 @@ export function handleReport(id: number, action: ReportHandleAction) {
   return formPost<string>('/api/admin/reports/' + id + '/handle', { action })
 }
 
-// JWT 仅用于界面识别本人；实际操作权限始终由服务端校验。
 export const isLoggedIn = computed(() => !!authState.token && authState.validated)
 export const currentUserId = computed(() => {
   if (!isLoggedIn.value) return null
@@ -302,7 +285,6 @@ export function archiveAgentSession(id: number) {
   return request<void>('/api/agent/sessions/' + encodeURIComponent(id), { method: 'DELETE' })
 }
 
-/** POST SSE 使用现有服务地址及登录态；不能用只支持 GET 的 EventSource。 */
 export async function streamAgentChat(
   payload: AgentChatRequest,
   onEvent: (event: AgentStreamEvent) => void,
@@ -319,7 +301,6 @@ export async function streamAgentChat(
     body: JSON.stringify(payload),
     signal,
   })
-  // 参数错误可能仍以 HTTP 200 + JSON code 返回，不能当作空的成功事件流。
   if (!response.ok || !response.headers.get('Content-Type')?.toLowerCase().includes('text/event-stream')) {
     let body: { code?: number; msg?: string; error?: string } | null = null
     try { body = await response.json() } catch { /* 网关错误不一定有 JSON 正文 */ }
@@ -370,7 +351,6 @@ export async function streamAgentChat(
   try {
     while (!completed) {
       const { done, value } = await reader.read()
-      // 网络分块可能截断 UTF-8 中文或事件行，必须跨块保留解码状态与未完成帧。
       buffer += done ? decoder.decode() : decoder.decode(value, { stream: true })
       let boundary: RegExpExecArray | null
       while ((boundary = /\r\n\r\n|\n\n|\r\r/.exec(buffer))) {

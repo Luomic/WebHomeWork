@@ -9,11 +9,8 @@ import GrokCharacter from '@/components/GrokCharacter.vue'
 import { useRouter } from 'vue-router'
 
 
-// 背板跟随全局主题，避免暗色模式下仍然保留一块刺眼的白圆盘。
-// inject：取 App.vue provide 下来的 isDark（暗色开关）
 const router = useRouter()
 const isDark = inject('isDark', ref(false))
-// 底板颜色随主题切换
 const plateColor = computed(() => isDark.value ? '#292722' : '#f7f5ef')
 const grokScheme = computed(() => isDark.value ? 'dark' : 'light')
 
@@ -36,7 +33,6 @@ function handlePointer(e: PointerEvent) {
   el.style.setProperty('--y', `${e.clientY - rect.top}px`)
   const x = Math.max(-1, Math.min(1, (e.clientX - rect.left) / rect.width * 2 - 1))
   const y = Math.max(-1, Math.min(1, (e.clientY - rect.top) / rect.height * 2 - 1))
-  // setProperty：给元素写 CSS 变量，样式表里 var(--title-tx) 就跟着变
   el.style.setProperty('--title-tx', `${x * 8}px`)
   el.style.setProperty('--title-ty', `${y * 6}px`)
   el.style.setProperty('--title-rx', `${-y * 1.2}deg`)
@@ -207,7 +203,6 @@ function goGithub(){
     margin: 0;
   }
 
-  /* 整页变纵向排列 */
   .welcome {
     display: flex;
     flex-direction: column;

@@ -6,14 +6,12 @@
                 <SidebarSpacer />
                 <SidebarAside class="home-nav-aside">
                     <SidebarPanel>
-                        <!--美味的头菜单-->
                         <SidebarHeader>
                             <SidebarMenu>
                                 <SidebarMenuItem>
                                     <SidebarMenuButton class="p-1!">
                                         <div
                                             class="account-avatar">
-                                            <!-- aria-hidden：装饰图标，读屏跳过 -->
                                             <User aria-hidden="true" /></div>
                                         <span class="font-semibold text-sm">{{ isLoggedIn ? (authState.user?.account || '老朋友') : '新朋友' }}</span>
                                     </SidebarMenuButton>
@@ -27,8 +25,6 @@
                                 <SidebarGroupContent>
                                     <SidebarMenu>
                                         <SidebarMenuItem>
-                                            <!-- as="router-link"：把按钮渲染成路由链接（点击跳转不刷新）；
-                                                 :to：目标路由（按 name 找）；:isActive：当前页高亮 -->
                                             <SidebarMenuButton as="router-link" :to="{ name: 'home-main' }"
                                                 :isActive="$route.name === 'home-main' && !$route.query.favorites">
                                                 <Home />
@@ -78,7 +74,6 @@
                                 </SidebarGroupContent>
                             </SidebarGroup>
 
-                            <!-- 仅有效的管理员登录态显示管理入口。 -->
                             <SidebarGroup v-if="showAdminPanel">
                                 <SidebarGroupLabel>管理员面板</SidebarGroupLabel>
                                 <SidebarGroupContent>
@@ -102,7 +97,6 @@
                             </SidebarGroup>
                         </SidebarContent>
 
-                        <!-- 底部：账户登录入口 -->
                         <SidebarFooter>
                             <SidebarMenu>
                                 <SidebarMenuItem>
@@ -117,10 +111,8 @@
                 </SidebarAside>
             </Sidebar>
 
-            <!-- 主区域 -->
             <SidebarMain class="min-w-0">
                 <header class="home-header flex h-12 shrink-0 items-center gap-4 border-b border-surface-200 dark:border-surface-700 px-4">
-                    <!-- 折叠侧栏的按钮：target="nav" 对应上面 Sidebar 的 id -->
                     <SidebarTrigger target="nav" severity="secondary" :text="true" size="small" aria-label="打开或收起导航栏">
                         <SidebarIcon />
                     </SidebarTrigger>
@@ -143,7 +135,6 @@
                 </div>
             </SidebarMain>
         </SidebarLayout>
-        <!-- 两个全局弹窗：开关由 v-model:visible 双向绑定 -->
         <LoginDialog v-model:visible="loginVisible"/>
         <PostComposer v-model:visible="postVisible" />
     </div>
@@ -205,7 +196,6 @@ const navOpen = ref(!isMobile.value);         // 侧栏展开？
 const postVisible = ref(false);    // 发布弹窗
 const showAdminPanel = computed(() => isLoggedIn.value && authState.user?.role === 'admin');
 const signing = ref(false), accountNotice = ref(''), accountError = ref(false);
-// 新提示重新计时；清空提示或卸载页面时取消旧计时器。
 watch(accountNotice, (message, _, onCleanup) => {
     if (!message) return;
     const timer = window.setTimeout(() => { accountNotice.value = ''; }, 5000);
@@ -235,12 +225,10 @@ const toggleTheme = inject('toggleTheme', () => {});
 function openPost() {
     postVisible.value = true;
 }
-// 发布入口下放给子路由（如市集页），子页面不用自己再存一份弹窗状态。
 provide('openPost', openPost);
 let mql = null;
 let onMqlChange = null;
 
-// 监听"是否手机"的媒体查询：跨过 1023px 断点时同步 isMobile 并展开/收起侧栏。
 onMounted(() => {
     if (typeof window === 'undefined') return;
 

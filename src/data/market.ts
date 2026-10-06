@@ -2,7 +2,6 @@ import { reactive, toRaw } from 'vue'
 import type { GoodsList } from '@/types/goods/Goods'
 import type { Status } from '@/types/response/response'
 
-// 发布帖子里“地点”的值对象：POI 搜索结果或地图点选/定位。
 export interface PlaceValue {
   name: string
   address: string
@@ -11,7 +10,6 @@ export interface PlaceValue {
   source: 'poi' | 'map'
 }
 
-/** 商品卡片需要的展示字段。接口返回的 GoodsList 通过 toMarketItem 统一适配。 */
 export interface MarketItem {
   id: string
   title: string
@@ -36,7 +34,6 @@ export interface MarketItem {
 export const campus: [number, number] = [120.165741, 30.293231]
 const asset = (n: number) => import.meta.env.BASE_URL + 'placeholder/' + n + '.webp'
 
-/** 本地商品示例，结构对应 /api/goods/ranked 的 data；数组顺序仅模拟推荐结果，GoodsList 本身不足以重算推荐分。 */
 export const goodsItems: GoodsList[] = [
   { id: 1, title: '校园文创套装，笔记本与帆布袋', category: '生活', price: 25, images: [asset(1), asset(3)], status: 'approved', user_id: 1001, created_at: '2026-09-30T09:00:00+08:00', updated_at: '2026-09-30T09:00:00+08:00', deleted_at: null, description: '笔记本和帆布袋成色良好，适合日常上课使用。' },
   { id: 2, title: '深蓝校园 T 恤，简洁日常款', category: '服饰', price: 35, images: [asset(2)], status: 'approved', user_id: 1002, created_at: '2026-09-29T15:30:00+08:00', updated_at: '2026-09-29T15:30:00+08:00', deleted_at: null, description: '深蓝色校园 T 恤，日常穿着，具体尺码可在沟通时确认。' },
@@ -106,7 +103,6 @@ export function toMarketItem(goods: GoodsList<unknown>): MarketItem {
   }
 }
 
-/** 从描述末尾读取前端写入的坐标片段，并保证正文展示时不包含该实现细节。 */
 export function parseEmbeddedPosition(description?: string) {
   if (typeof description !== 'string') return null
   const match = description.match(/(?:\r?\n|^)\s*\{"position":\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]}\s*$/)
@@ -116,7 +112,6 @@ export function parseEmbeddedPosition(description?: string) {
   return { position, description: description.slice(0, match.index).trimEnd() }
 }
 
-// 商品列表页与地图页共享同一份适配结果，避免各自维护数据。
 export const marketItems: MarketItem[] = goodsItems
   .filter(goods => goods.status === 'approved')
   .map(goods => toMarketItem(goods))

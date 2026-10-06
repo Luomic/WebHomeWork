@@ -34,8 +34,6 @@ const query = computed({
   get: () => browseState.query,
   set: value => { browseState.query = value },
 })
-// /api/goods/ranked 返回完整推荐序列；先保留服务端排名筛选，再切每页 20 条。
-// GoodsList 没有等级、收藏量、有效举报量，前端不能从这些字段重算推荐分。
 const filteredGoods = computed(() => {
   const needle = query.value.trim().toLocaleLowerCase()
   const list = goodsItems.value.filter(item =>
@@ -43,14 +41,11 @@ const filteredGoods = computed(() => {
     (browseState.category === '全部' || item.category === browseState.category) &&
     [item.title, item.description, item.category].filter(Boolean).join(' ').toLocaleLowerCase().includes(needle),
   )
-  // 价格排序只作用于副本；切回推荐排序时恢复原始排名。
   if (browseState.sort === 'price') return [...list].sort((a, b) => a.price - b.price)
   return list
 })
 const totalRecords = computed(() => filteredGoods.value.length)
 const visibleItems = computed(() => filteredGoods.value.slice(first.value, first.value + PAGE_SIZE).map(toMarketItem))
-// 分页、分类或筛选条件变化时更换 key，确保 Transition 真正创建离场/入场节点。
-// 只使用视图条件，不把商品对象本身序列化进 key，避免瀑布网格频繁重建。
 const feedViewKey = computed(() => JSON.stringify([
   first.value,
   browseState.category,
@@ -65,7 +60,6 @@ function onPage(event) {
   first.value = event.first
   resetScroll()
 }
-// ranked 接口已按服务端推荐算法排序；这里仅规范图片 URL，不重算推荐顺序。
 async function loadGoods() {
   const version = ++loadVersion
   feedLoading.value = true
@@ -113,19 +107,16 @@ function measureGrid(grid) {
   })
 }
 function measure() {
-  // 打断上一帧
   cancelAnimationFrame(frame)
   frame = requestAnimationFrame(() => measureGrid(gridEl.value))
 }
 function prepareFeed(section) {
-  // enter 时 DOM 已插入，但模板 ref 可能尚未更新；从入场节点直接测量，首帧即呈现正确瀑布布局。
   const grid = section.querySelector('.feed-grid')
   disconnectGridObserver()
   grid?.querySelectorAll('.market-card').forEach(el => observer?.observe(el))
   measureGrid(grid)
 }
 async function observeCards() {
-  // 异步等待DOM更新
   await nextTick()
   disconnectGridObserver()
   gridEl.value?.querySelectorAll('.market-card').forEach(el => observer?.observe(el))
@@ -143,7 +134,6 @@ async function restoreFeed() {
   await observeCards()
   restoreScroll()
 }
-// 条件变化先复位分页，再由入场钩子绑定新网格，避免观察到离场中的旧卡片。
 watch([query, () => browseState.category, () => browseState.sort], () => {
   first.value = 0
   selected.value = null
@@ -157,8 +147,6 @@ watch(totalRecords, total => {
 const onGoodsUpdated = () => { void loadGoods() }
 const onFavoritesUpdated = () => { if (favoritesOnly.value) void loadGoods() }
 watch([favoritesOnly, isLoggedIn, () => authState.token], () => { first.value = 0; selected.value = null; void loadGoods() })
-// 首次请求和发布刷新都会异步替换商品网格；数据变化后重新绑定卡片观察器，
-// 避免节点刚渲染时错过瀑布流行高测量。
 watch(goodsItems, () => { void observeCards() }, { flush: 'post' })
 onMounted(async () => {
   observer = new ResizeObserver(measure)

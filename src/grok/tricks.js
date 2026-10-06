@@ -1,6 +1,3 @@
-/* Vendored from grok-icon-study/replica —— 仅供学习研究，角色造型与商标归 xAI 及相应权利人。
- * 本文件由 port-to-vue.mjs 自动生成，请勿手工编辑：改动请改上游或脚本后重新生成。
- * 局部单字母变量名沿用上游混淆产物，未做重命名。 */
 import { spring, K2, rand, sign } from './math.js'
 
 export const HOP_SEGS = [

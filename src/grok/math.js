@@ -1,6 +1,3 @@
-/* Vendored from grok-icon-study/replica —— 仅供学习研究，角色造型与商标归 xAI 及相应权利人。
- * 本文件由 port-to-vue.mjs 自动生成，请勿手工编辑：改动请改上游或脚本后重新生成。
- * 局部单字母变量名沿用上游混淆产物，未做重命名。 */
 export const spring = (x) => ({ x, v: 0, t: x });
 export const stepSpring = (s, freq, damp, dt) => {
   s.v += (-2 * damp * freq * s.v - freq * freq * (s.x - s.t)) * dt;
@@ -142,7 +139,6 @@ export function spanAt(path, Re) {
   return fn;
 }
 
-// Source z_t — live span of a polyline at Y (used while shape-morphing)
 export function spanPoly(n, e, Re) {
   let t = -Infinity, s = Infinity;
   for (let r = 0; r < n.length; r++) {
@@ -184,7 +180,6 @@ export function relRot(pose, home) {
   ];
 }
 
-// Source HBe — silhouette radii of a solid-of-revolution at yaw `angle`.
 export function solidRadii(solid, angle, n = 96) {
   const c = Math.cos(angle), s = Math.sin(angle);
   const r = solid.map(([x, y, z, rad]) => [x * c + z * s, y, rad]);
@@ -208,7 +203,6 @@ export function solidRadii(solid, angle, n = 96) {
   ) / 16);
 }
 
-// Source Po().turnAt — scale the polar ring by HBe(yaw)/HBe(0).
 export function makeTurnAt(solid, ring, Re) {
   const rest = solidRadii(solid, 0);
   return (yaw) => {
@@ -225,7 +219,6 @@ export function makeTurnAt(solid, ring, Re) {
   };
 }
 
-// Source _Fe — map a pointer onto an ellipse around the mark
 export function mapPointer(rect, pt, JFe = 0.6, iin = 22, ain = 14, oin = 2) {
   const t = rect.left + rect.width / 2;
   const s = rect.top + rect.height / 2;

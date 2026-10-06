@@ -64,7 +64,6 @@ const archiveVisible = computed({
   },
 })
 
-// 只在内存保留本页收到的 trace，不伪造历史接口没有返回的调用记录。
 const traces = new Map()
 let epoch = 0
 let listVersion = 0
@@ -109,7 +108,6 @@ function rememberSession(id) {
   try {
     sessionStorage.setItem(key, String(id || 0))
   } catch {
-    /* 禁止存储时仍可正常聊天 */
   }
 }
 function recalledSession() {
@@ -134,7 +132,6 @@ function formatTime(value) {
       }).format(date)
 }
 function messageId() {
-  // getRandomValues 在非 HTTPS 环境也可用，避免依赖安全上下文中的 randomUUID。
   const bytes = crypto.getRandomValues(new Uint8Array(16))
   bytes[6] = (bytes[6] & 15) | 64
   bytes[8] = (bytes[8] & 63) | 128
@@ -206,7 +203,6 @@ async function loadHistory(session, closeHistory = true) {
         ...item,
         key: 'saved-' + item.id,
         trace: traces.get(item.id) || [],
-        // 历史失败记录可能包含内部错误，只展示面向用户的状态。
         notice: item.status === 'failed' ? '这次回答未完成。可重新提问，或稍后再试。' : '',
         prompt:
           item.role === 'assistant'
@@ -303,7 +299,6 @@ async function submit() {
   let userMessage = null
   let receivedDone = false
   try {
-    // 先获得服务端会话 ID，即使首次提问断开，也能再次查询这段历史。
     if (!selectedSession.value) {
       const session = await createAgentSession(Array.from(prompt).slice(0, 20).join(''))
       if (!valid(turn)) return
@@ -360,8 +355,6 @@ async function submit() {
     if (!valid(turn)) return
     checkingHistory.value = true
     status.value = '回答已结束，正在核对已保存的消息…'
-    // done 不含正文，幂等命中甚至没有 delta；以对应 client_msg_id 的历史回答为准。
-    // 同时去掉工具多轮调用中流出的中间话语，最终展示服务端保存的回答。
     try {
       const history = await getAgentMessages(request.session_id)
       if (!valid(turn)) return

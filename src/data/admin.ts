@@ -3,7 +3,6 @@ import type { GoodsReport } from '@/types/admin/review'
 
 const asset = (n: number) => import.meta.env.BASE_URL + 'placeholder/' + n + '.webp'
 
-/** /api/admin/post/pending 的本地响应示例，保持文档要求的创建时间升序。 */
 export const pendingGoods: GoodsList[] = [
   {
     id: 102,
@@ -33,7 +32,6 @@ export const pendingGoods: GoodsList[] = [
   },
 ]
 
-/** /api/admin/reports 返回全部状态；面板只从中展示 pending 的本地示例。 */
 export const reportItems: GoodsReport[] = [
   {
     id: 203,

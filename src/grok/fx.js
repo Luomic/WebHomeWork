@@ -1,6 +1,3 @@
-/* Vendored from grok-icon-study/replica —— 仅供学习研究，角色造型与商标归 xAI 及相应权利人。
- * 本文件由 port-to-vue.mjs 自动生成，请勿手工编辑：改动请改上游或脚本后重新生成。
- * 局部单字母变量名沿用上游混淆产物，未做重命名。 */
 import { GROK_GEO } from './geometry.js'
 import { makeTurnAt } from './math.js'
 
@@ -886,7 +883,6 @@ export function shapeMetrics(shape, R) {
   };
 }
 
-// 上游 GROK_FX 导出对象里的两个方法，此处提成具名函数
 export function circlePathOf(R) { return closedSpline(circleRing(R)); }
 export function overlayRing(kind, R, teardropPath) {
   if (kind === "pencil" && teardropPath) {
