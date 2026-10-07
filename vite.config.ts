@@ -1,6 +1,6 @@
 import { fileURLToPath, URL } from 'node:url'
 
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type ProxyOptions } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 import tailwindcss from '@tailwindcss/vite'
@@ -21,19 +21,17 @@ export default defineConfig(({ mode }) => {
       },
     }
   }
-  const amapProxy = securityCode ? {
-    '/_AMapService/v4/map/styles': directProxy('https://webapi.amap.com'),
-    '/_AMapService/': directProxy('https://restapi.amap.com'),
-  } : proxyTarget ? {
-    '/_AMapService/': {
-      target: proxyTarget,
-      changeOrigin: true,
-    },
-  } : undefined
-  const apiProxy = apiTarget ? {
-    '/api': { target: apiTarget, changeOrigin: true },
-    '/uploads': { target: apiTarget, changeOrigin: true },
-  } : undefined
+  const proxy: Record<string, ProxyOptions> = {}
+  if (securityCode) {
+    proxy['/_AMapService/v4/map/styles'] = directProxy('https://webapi.amap.com')
+    proxy['/_AMapService/'] = directProxy('https://restapi.amap.com')
+  } else if (proxyTarget) {
+    proxy['/_AMapService/'] = { target: proxyTarget, changeOrigin: true }
+  }
+  if (apiTarget) {
+    proxy['/api'] = { target: apiTarget, changeOrigin: true }
+    proxy['/uploads'] = { target: apiTarget, changeOrigin: true }
+  }
   return {
     plugins: [
       vue(),
@@ -45,10 +43,10 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      proxy: { ...(amapProxy || {}), ...(apiProxy || {}) },
+      proxy,
     },
     preview: {
-      proxy: { ...(amapProxy || {}), ...(apiProxy || {}) },
+      proxy,
     },
   }
 })
